@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Empresas | ComensalQR{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h1 class="h2 mb-0">Empresas</h1>
+    <a class="btn btn-primary" href="{% url 'empresas:crear' %}">Agregar empresa</a>
+</div>
+<div class="card shadow-sm">
+    <form method="post" action="{% url 'empresas:eliminar' %}" id="delete-companies-form" data-confirm-message="Se eliminarán las empresas seleccionadas y esta acción no se puede deshacer. ¿Deseas continuar?">
+        {% csrf_token %}
+        <div class="cq-bulk-actions">
+            <label class="cq-switch cq-switch-compact mb-0"><input id="select-all-companies" type="checkbox"> <span class="cq-switch-track" aria-hidden="true"></span><span>Seleccionar todas</span></label>
+            <button class="btn btn-outline-danger btn-sm" type="submit">Eliminar seleccionadas</button>
+        </div>
+        <div class="cq-table-wrap">
+            <table class="table cq-table">
+                <thead><tr><th></th><th>Nombre</th><th>RUT</th><th>Estado</th><th>Trabajadores</th><th></th></tr></thead>
+                <tbody>
+                    {% for empresa in empresas %}
+                        <tr>
+                            <td><label class="cq-switch cq-switch-table"><input class="company-checkbox" name="empresas" value="{{ empresa.pk }}" type="checkbox"><span class="cq-switch-track" aria-hidden="true"></span><span class="visually-hidden">Seleccionar {{ empresa.nombre }}</span></label></td>
+                            <td class="fw-semibold">{{ empresa.nombre }}</td><td>{{ empresa.rut|default:"-" }}</td>
+                            <td>{% if empresa.activa %}<span class="badge text-bg-success">Activa</span>{% else %}<span class="badge text-bg-secondary">Inactiva</span>{% endif %}</td>
+                            <td>{{ empresa.trabajadores.count }}</td>
+                            <td><a href="{% url 'empresas:perfil' empresa.pk %}">Ver perfil</a></td>
+                        </tr>
+                    {% empty %}
+                        <tr><td colspan="6" class="text-secondary">No hay empresas registradas.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </form>
+</div>
+<script>
+    const selectAllCompanies = document.getElementById("select-all-companies");
+    const companyCheckboxes = document.querySelectorAll(".company-checkbox");
+    const deleteCompaniesForm = document.getElementById("delete-companies-form");
+    selectAllCompanies.addEventListener("change", () => companyCheckboxes.forEach((checkbox) => { checkbox.checked = selectAllCompanies.checked; }));
+    deleteCompaniesForm.addEventListener("submit", (event) => {
+        const selected = document.querySelectorAll(".company-checkbox:checked").length;
+        if (!selected) {
+            event.preventDefault();
+            window.cqShowToast("Selecciona al menos una empresa para eliminar.", "warning");
+            return;
+        }
+    });
+</script>
+{% endblock %}

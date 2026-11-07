@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}{{ empresa.nombre }} | ComensalQR{% endblock %}
+{% block content %}
+<div class="cq-heading">
+    <div><div class="cq-eyebrow">Perfil de empresa</div><h1>{{ empresa.nombre }}</h1><p class="cq-subtitle">Información y acceso a la operación.</p></div>
+    <div class="cq-actions">
+        <a class="btn btn-primary" href="{% url 'empresas:editar' empresa.pk %}">Editar perfil</a>
+        <a class="btn btn-outline-secondary" href="{% url 'empresas:lista' %}">Volver a empresas</a>
+    </div>
+</div>
+<div class="row g-3">
+    <div class="col-12 col-lg-5">
+        <div class="cq-card"><div class="cq-card-body">
+            <h2 class="cq-card-title">Datos registrados</h2>
+            <dl class="cq-data-list mb-0">
+                <dt>RUT</dt><dd>{{ empresa.rut|default:"-" }}</dd>
+                <dt>Dirección</dt><dd>{{ empresa.direccion|default:"-" }}</dd>
+                <dt>Teléfono</dt><dd>{{ empresa.telefono|default:"-" }}</dd>
+                <dt>Encargado del personal</dt><dd>{{ empresa.encargado_personal|default:"-" }}</dd>
+                <dt>Encargado de pagos</dt><dd>{{ empresa.encargado_pagos|default:"-" }}</dd>
+            </dl>
+        </div></div>
+    </div>
+    <div class="col-12 col-lg-7">
+        <div class="cq-card h-100"><div class="cq-card-body d-flex flex-column justify-content-between gap-4">
+            <div><div class="cq-eyebrow">Equipo</div><h2 class="cq-card-title">Trabajadores</h2><p class="cq-subtitle">{{ empresa.trabajadores.count }} trabajadores registrados.</p></div>
+            <a class="btn btn-outline-primary align-self-start" href="{% url 'trabajadores:por_empresa' empresa.pk %}">Ver trabajadores</a>
+        </div></div>
+    </div>
+</div>
+{% endblock %}

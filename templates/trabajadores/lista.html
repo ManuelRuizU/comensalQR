@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Trabajadores | ComensalQR{% endblock %}
+{% block content %}
+<div class="cq-heading">
+    <div>
+        <div class="cq-eyebrow">Directorio</div><h1>Trabajadores</h1>
+        {% if empresa %}<p class="cq-subtitle">Empresa: {{ empresa.nombre }}</p>{% endif %}
+    </div>
+    <div class="cq-actions"><a class="btn btn-primary" href="{% url 'trabajadores:crear' %}">Agregar trabajador</a></div>
+</div>
+<div class="cq-card">
+    {% if empresa %}
+        <form method="post" action="{% url 'trabajadores:eliminar' empresa.pk %}" id="delete-workers-form" data-confirm-message="Se eliminarán los trabajadores seleccionados y esta acción no se puede deshacer. ¿Deseas continuar?">
+            {% csrf_token %}
+            <div class="cq-bulk-actions">
+                <label class="cq-switch cq-switch-compact mb-0"><input id="select-all-workers" type="checkbox"> <span class="cq-switch-track" aria-hidden="true"></span><span>Seleccionar todos</span></label>
+                <button class="btn btn-outline-danger btn-sm" type="submit">Eliminar seleccionados</button>
+            </div>
+            <div class="cq-table-wrap">
+                <table class="table cq-table">
+                    <thead><tr><th></th><th>Nombre</th><th>RUT</th><th>Empresa</th><th>Estado</th><th>QR</th></tr></thead>
+                    <tbody>
+                        {% for trabajador in trabajadores %}
+                            <tr>
+                                <td><label class="cq-switch cq-switch-table"><input class="worker-checkbox" name="trabajadores" value="{{ trabajador.pk }}" type="checkbox"><span class="cq-switch-track" aria-hidden="true"></span><span class="visually-hidden">Seleccionar {{ trabajador }}</span></label></td>
+                                <td class="fw-semibold">{{ trabajador }}</td><td>{{ trabajador.rut }}</td><td>{{ trabajador.empresa }}</td>
+                                <td>{% if trabajador.activo %}<span class="badge text-bg-success">Activo</span>{% else %}<span class="badge text-bg-secondary">Inactivo</span>{% endif %}</td>
+                                <td><a class="btn btn-sm btn-outline-primary" href="{% url 'trabajadores:qr' trabajador.pk %}">Descargar tarjeta QR</a></td>
+                            </tr>
+                        {% empty %}
+                            <tr><td colspan="6" class="text-secondary">Esta empresa no tiene trabajadores registrados.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </form>
+    {% else %}
+        <div class="cq-table-wrap">
+            <table class="table cq-table">
+                <thead><tr><th>Nombre</th><th>RUT</th><th>Empresa</th><th>Estado</th><th>QR</th></tr></thead>
+                <tbody>{% for trabajador in trabajadores %}<tr><td class="fw-semibold">{{ trabajador }}</td><td>{{ trabajador.rut }}</td><td>{{ trabajador.empresa }}</td><td>{% if trabajador.activo %}<span class="badge text-bg-success">Activo</span>{% else %}<span class="badge text-bg-secondary">Inactivo</span>{% endif %}</td><td><a class="btn btn-sm btn-outline-primary" href="{% url 'trabajadores:qr' trabajador.pk %}">Descargar tarjeta QR</a></td></tr>{% empty %}<tr><td colspan="5" class="text-secondary">No hay trabajadores registrados.</td></tr>{% endfor %}</tbody>
+            </table>
+        </div>
+    {% endif %}
+</div>
+{% if empresa %}<script>
+    const selectAll = document.getElementById("select-all-workers");
+    const workerCheckboxes = document.querySelectorAll(".worker-checkbox");
+    const deleteForm = document.getElementById("delete-workers-form");
+    selectAll.addEventListener("change", () => workerCheckboxes.forEach((checkbox) => { checkbox.checked = selectAll.checked; }));
+    deleteForm.addEventListener("submit", (event) => {
+        const selected = document.querySelectorAll(".worker-checkbox:checked").length;
+        if (!selected) {
+            event.preventDefault();
+            window.cqShowToast("Selecciona al menos un trabajador para eliminar.", "warning");
+            return;
+        }
+    });
+</script>{% endif %}
+{% endblock %}

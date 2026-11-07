@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}{% if form.instance.pk %}Editar local{% else %}Nuevo local{% endif %} | ComensalQR{% endblock %}
+{% block content %}
+<div class="cq-form-page">
+    <h1 class="h2 mb-4">{% if form.instance.pk %}Editar local{% else %}Nuevo local{% endif %}</h1>
+    <div class="card shadow-sm"><div class="card-body">
+        <form method="post">
+            {% csrf_token %}
+            {{ form.as_p }}
+            <div class="d-flex gap-2"><button class="btn btn-primary" type="submit">Guardar</button><a class="btn btn-outline-secondary" href="{% url 'locales:lista' %}">Cancelar</a></div>
+        </form>
+    </div></div>
+</div>
+{% endblock %}

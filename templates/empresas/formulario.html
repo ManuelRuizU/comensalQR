@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Nueva empresa | ComensalQR{% endblock %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-12 col-md-8 col-lg-7">
+    <div class="cq-heading">
+        <div>
+            <div class="cq-eyebrow">Directorio</div>
+            <h1>Agregar empresa</h1>
+            <p class="cq-subtitle">Registra los datos principales y responsables de la empresa.</p>
+        </div>
+        <div class="cq-actions"><a class="btn btn-outline-secondary" href="{% url 'empresas:lista' %}">Volver a empresas</a></div>
+    </div>
+    <form method="post" class="cq-card cq-form-card">
+        {% csrf_token %}
+        {{ form.non_field_errors }}
+        {% for field in form %}
+            <div class="cq-form-field{% if field.field.widget.input_type == 'checkbox' %} cq-switch-field{% endif %}{% if not field.field.required %} optional{% endif %} mb-3{% if field.errors %} has-error{% endif %}">
+                {{ field.errors }}
+                {{ field.label_tag }}
+                {{ field }}
+            </div>
+        {% endfor %}
+        <div class="cq-form-actions">
+            <button class="btn btn-primary" type="submit">Guardar empresa</button>
+            <a class="btn btn-outline-secondary" href="{% url 'empresas:lista' %}">Cancelar</a>
+        </div>
+    </form>
+</div></div>
+{% endblock %}

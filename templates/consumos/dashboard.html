@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Dashboard | ComensalQR{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+    <div>
+        <h1 class="h2 mb-1">Dashboard</h1>
+        <p class="text-secondary mb-0">Resumen del {{ fecha|date:"d/m/Y" }}</p>
+    </div>
+    <div class="d-flex gap-2"><a class="btn btn-outline-primary" href="{% url 'consumos:historial' %}">Ver historial</a><a class="btn btn-primary" href="{% url 'consumos:escaner' %}">Abrir escaner</a></div>
+</div>
+<div class="row g-3 mb-4">
+    <div class="col-12 col-md-4">
+        <div class="card shadow-sm h-100"><div class="card-body">
+            <div class="text-secondary">Almuerzos hoy</div>
+            <div class="display-5 fw-bold">{{ total_hoy }}</div>
+        </div></div>
+    </div>
+    <div class="col-12 col-md-8">
+        <div class="card shadow-sm h-100"><div class="card-body">
+            <h2 class="h5">Por empresa</h2>
+            {% for empresa in empresas %}
+                <div class="d-flex justify-content-between border-bottom py-2">
+                    <span>{{ empresa.trabajador__empresa__nombre }}</span><strong>{{ empresa.total }}</strong>
+                </div>
+            {% empty %}
+                <p class="text-secondary mb-0">Todavia no hay consumos registrados.</p>
+            {% endfor %}
+        </div></div>
+    </div>
+</div>
+<div class="card shadow-sm">
+    <div class="card-body">
+        <h2 class="h5">Ultimos consumos</h2>
+        <div class="table-responsive">
+            <table class="table align-middle mb-0">
+                <thead><tr><th>Trabajador</th><th>Empresa</th><th>Hora</th></tr></thead>
+                <tbody>
+                    {% for consumo in ultimos_consumos %}
+                        <tr><td>{{ consumo.trabajador }}</td><td>{{ consumo.trabajador.empresa }}</td><td>{{ consumo.registrado_en|date:"H:i" }}</td></tr>
+                    {% empty %}
+                        <tr><td class="text-secondary" colspan="3">Sin registros.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

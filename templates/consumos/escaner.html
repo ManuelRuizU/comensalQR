@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block title %}Escaner | ComensalQR{% endblock %}
+{% block content %}
+<div class="cq-scanner-page">
+    <div class="cq-scanner-heading">
+        <div><div class="cq-eyebrow">Modo operador</div><h1>Escanear almuerzo</h1><p class="cq-subtitle">Identifica al comensal y registra su almuerzo.</p></div>
+        <button id="cq-install-pwa" class="btn btn-outline-primary" type="button" hidden>Instalar app</button>
+    </div>
+    <div class="cq-scanner-status" id="scanner-status" role="status">
+        <span class="cq-status-dot" aria-hidden="true"></span>
+        <span id="scanner-status-text">Cámara lista para escanear</span>
+        <button id="retry-camera" class="btn btn-sm btn-outline-danger" type="button" hidden>Reintentar cámara</button>
+    </div>
+    <div id="scan-result" class="cq-scan-result" role="status" hidden></div>
+    <div class="cq-scanner-card cq-card">
+        <div class="cq-reader-label"><span>Escáner QR</span><span class="cq-reader-hint">Cámara trasera · siempre activa</span></div>
+        <div id="reader" class="cq-reader mb-3"></div>
+        <div class="cq-scanner-controls">
+            <form method="post" id="scan-form">
+                {% csrf_token %}
+                <label class="form-label" for="token">Código manual</label>
+                <div class="input-group">
+                    <input class="form-control" id="token" name="token" autocomplete="off" required placeholder="Usa esto si la cámara no lee el QR">
+                    <button class="btn btn-primary" type="submit">Registrar</button>
+                </div>
+            </form>
+            <p class="form-text">La cámara se activa al permitir el acceso desde el teléfono.</p>
+        </div>
+    </div>
+    {% if error %}<div class="cq-banner cq-banner-danger" role="alert">{{ error }}</div>{% endif %}
+    <a class="cq-scanner-back" href="{% url 'consumos:dashboard' %}">Volver al dashboard</a>
+</div>
+<script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+<script>
+    const tokenInput = document.getElementById("token");
+    const scanForm = document.getElementById("scan-form");
+    const resultPanel = document.getElementById("scan-result");
+    let scanner;
+    let scanLocked = false;
+    const retryCameraButton = document.getElementById("retry-camera");
+
+    function playScanSound() {
+        const audioContext = window.cqAudioContext || new (window.AudioContext || window.webkitAudioContext)();
+        window.cqAudioContext = audioContext;
+        const oscillator = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        oscillator.frequency.value = 880;
+        oscillator.type = "sine";
+        gain.gain.setValueAtTime(0.12, audioContext.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.16);
+        oscillator.connect(gain).connect(audioContext.destination);
+        oscillator.start();
+        oscillator.stop(audioContext.currentTime + 0.16);
+    }
+
+    function playErrorSound() {
+        const audioContext = window.cqAudioContext || new (window.AudioContext || window.webkitAudioContext)();
+        window.cqAudioContext = audioContext;
+        const oscillator = audioContext.createOscillator();
+        const gain = audioContext.createGain();
+        oscillator.frequency.value = 220;
+        oscillator.type = "square";
+        gain.gain.setValueAtTime(0.1, audioContext.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.22);
+        oscillator.connect(gain).connect(audioContext.destination);
+        oscillator.start();
+        oscillator.stop(audioContext.currentTime + 0.22);
+    }
+
+    function showScanResult(data) {
+        resultPanel.hidden = false;
+        const isRegistered = data.status === "registered";
+        const isError = data.status === "error";
+        resultPanel.className = `cq-scan-result cq-scan-result-${isRegistered ? "success" : isError ? "danger" : "warning"}`;
+        if (isRegistered) {
+            resultPanel.innerHTML = "<div class=\"cq-result-mark\">✓</div>";
+            return;
+        }
+        resultPanel.innerHTML = `<div class="cq-result-mark">${isError ? "×" : "!"}</div><div><div class="cq-result-label">${isError ? "QR no válido" : "QR ya escaneado"}</div><span>${isError ? "No se registró el consumo." : "Este comensal ya tiene su almuerzo registrado."}</span></div>`;
+    }
+
+    function startScanner() {
+        scanLocked = false;
+        document.getElementById("scanner-status-text").textContent = "Cámara lista para escanear";
+        scanner.start({ facingMode: "environment" }, {
+            fps: 10,
+            qrbox: { width: 250, height: 250 },
+        }, onScanSuccess, () => {}).catch((error) => {
+            document.getElementById("scanner-status-text").textContent = "No se pudo reactivar la cámara";
+            retryCameraButton.hidden = false;
+            window.cqShowToast("Mueve el teléfono y vuelve a permitir el acceso a la cámara.", "danger");
+            console.error("No se pudo iniciar el escáner", error);
+        });
+    }
+
+    function onScanSuccess(decodedText) {
+        if (scanLocked) return;
+        scanLocked = true;
+        scanner.pause(true);
+        playScanSound();
+        tokenInput.value = decodedText;
+        document.getElementById("scanner-status-text").textContent = "Código detectado. Registrando...";
+        fetch(scanForm.action || window.location.href, {
+            method: "POST",
+            body: new FormData(scanForm),
+            headers: { "X-Requested-With": "XMLHttpRequest" },
+        })
+            .then(async (response) => {
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.message || "No fue posible registrar el consumo.");
+                showScanResult(data);
+                if (data.status === "duplicate") playErrorSound();
+                document.getElementById("scanner-status-text").textContent = data.status === "duplicate" ? "QR ya escaneado. Cámara lista para continuar" : "Cámara lista para continuar";
+            })
+            .catch((error) => {
+                playErrorSound();
+                showScanResult({ status: "error", message: error.message });
+                document.getElementById("scanner-status-text").textContent = "Lectura no registrada. Cámara lista para reintentar";
+            })
+            .finally(() => {
+                tokenInput.value = "";
+                const waitTime = resultPanel.classList.contains("cq-scan-result-success") ? 450 : 1800;
+                window.setTimeout(() => {
+                    resultPanel.hidden = true;
+                    try {
+                        scanner.resume();
+                        scanLocked = false;
+                        retryCameraButton.hidden = true;
+                        document.getElementById("scanner-status-text").textContent = "Cámara lista para escanear";
+                    } catch (error) {
+                        document.getElementById("scanner-status-text").textContent = "No se pudo reactivar la cámara";
+                        retryCameraButton.hidden = false;
+                        window.cqShowToast("Toca el botón de reintento para reactivar la cámara.", "danger");
+                        console.error("No se pudo reanudar el escáner", error);
+                    }
+                }, waitTime);
+            });
+    }
+
+    scanForm.addEventListener("submit", (event) => event.preventDefault());
+    retryCameraButton.addEventListener("click", () => {
+        try {
+            scanner.resume();
+            retryCameraButton.hidden = true;
+            scanLocked = false;
+            document.getElementById("scanner-status-text").textContent = "Cámara lista para escanear";
+        } catch (error) {
+            window.cqShowToast("Cierra otras aplicaciones que estén usando la cámara y vuelve a intentar.", "danger");
+        }
+    });
+    scanner = new Html5Qrcode("reader");
+    startScanner();
+</script>
+{% endblock %}

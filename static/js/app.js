@@ -26,8 +26,14 @@
         const toast = document.createElement("div");
         toast.className = `cq-toast cq-toast-${level || "info"}`;
         toast.setAttribute("role", "status");
-        toast.innerHTML = `<span>${message}</span><button type="button" aria-label="Cerrar notificacion">&times;</button>`;
-        toast.querySelector("button").addEventListener("click", () => toast.remove());
+        const text = document.createElement("span");
+        text.textContent = message;
+        const closeButton = document.createElement("button");
+        closeButton.type = "button";
+        closeButton.setAttribute("aria-label", "Cerrar notificacion");
+        closeButton.textContent = "\u00d7";
+        toast.append(text, closeButton);
+        closeButton.addEventListener("click", () => toast.remove());
         container.appendChild(toast);
         window.setTimeout(() => toast.remove(), 5000);
     }

@@ -5,10 +5,16 @@ from .models import Consumo
 
 @admin.register(Consumo)
 class ConsumoAdmin(admin.ModelAdmin):
-    list_display = ("trabajador", "empresa", "fecha", "registrado_en", "operador")
-    list_filter = ("fecha", "trabajador__empresa")
+    list_display = ("trabajador", "empresa", "fecha", "numero", "registrado_en", "operador", "metodo")
+    list_filter = ("fecha", "metodo", "trabajador__empresa")
     search_fields = ("trabajador__nombre", "trabajador__apellido", "trabajador__rut")
-    readonly_fields = ("registrado_en",)
+    readonly_fields = ("trabajador", "fecha", "numero", "operador", "registrado_en", "metodo")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
     @admin.display(ordering="trabajador__empresa", description="Empresa")
     def empresa(self, obj):

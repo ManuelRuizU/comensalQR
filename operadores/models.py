@@ -18,3 +18,16 @@ class Operador(models.Model):
 
     def __str__(self):
         return self.usuario.get_full_name() or self.usuario.get_username()
+
+
+class IntentoAcceso(models.Model):
+    clave = models.CharField(max_length=64, unique=True)
+    intentos = models.PositiveSmallIntegerField(default=0)
+    ventana_desde = models.DateTimeField()
+    bloqueado_hasta = models.DateTimeField(null=True, blank=True)
+    actualizado_en = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Intento de acceso"
+        verbose_name_plural = "Intentos de acceso"
+        indexes = [models.Index(fields=["actualizado_en"], name="login_attempt_updated_idx")]

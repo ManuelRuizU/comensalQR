@@ -1,9 +1,13 @@
 from django import forms
 
 from .models import Empresa
+from .validators import normalizar_rut
 
 
 class EmpresaForm(forms.ModelForm):
+    def clean_rut(self):
+        return normalizar_rut(self.cleaned_data["rut"])
+
     class Meta:
         model = Empresa
         fields = [
@@ -13,6 +17,7 @@ class EmpresaForm(forms.ModelForm):
             "telefono",
             "encargado_personal",
             "encargado_pagos",
+            "almuerzos_diarios",
             "activa",
         ]
         labels = {
@@ -22,5 +27,6 @@ class EmpresaForm(forms.ModelForm):
             "telefono": "Telefono",
             "encargado_personal": "Encargado del personal",
             "encargado_pagos": "Encargado de los pagos",
+            "almuerzos_diarios": "Almuerzos diarios por trabajador",
             "activa": "Empresa activa",
         }

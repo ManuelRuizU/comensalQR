@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Importación completada | ComensalQR{% endblock %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-12 col-lg-9">
+    <div class="cq-banner cq-banner-success"><strong>{{ creados|length }} trabajador(es) importados en {{ empresa.nombre }}.</strong> Cada uno ya tiene su QR.</div>
+    <div class="cq-card mb-4"><div class="cq-card-body">
+        <h2 class="cq-card-title">Descargar los QR de estos trabajadores</h2>
+        <p class="cq-subtitle">El papel y la imagen del teléfono tienen el mismo QR: el trabajador puede usar cualquiera de los dos.</p>
+        <div class="d-flex flex-wrap gap-2">
+            <a class="btn btn-primary" href="{% url 'trabajadores:qr_pdf' empresa.pk %}?{{ consulta }}">Tarjetas para imprimir (PDF)</a>
+            <a class="btn btn-outline-primary" href="{% url 'trabajadores:qr_zip' empresa.pk %}?{{ consulta }}">Imágenes para teléfono (ZIP)</a>
+            <a class="btn btn-outline-secondary" href="{% url 'trabajadores:por_empresa' empresa.pk %}">Ir a trabajadores</a>
+        </div>
+    </div></div>
+    <div class="cq-card"><div class="cq-table-wrap"><table class="table cq-table">
+        <thead><tr><th>Nombre</th><th>RUT</th><th>Almuerzos/día</th></tr></thead>
+        <tbody>{% for trabajador in creados %}<tr><td>{{ trabajador }}</td><td>{{ trabajador.rut }}</td><td>{{ trabajador.cupo_diario }}</td></tr>{% endfor %}</tbody>
+    </table></div></div>
+</div></div>
+{% endblock %}

@@ -18,13 +18,17 @@
                 <dt>Teléfono</dt><dd>{{ empresa.telefono|default:"-" }}</dd>
                 <dt>Encargado del personal</dt><dd>{{ empresa.encargado_personal|default:"-" }}</dd>
                 <dt>Encargado de pagos</dt><dd>{{ empresa.encargado_pagos|default:"-" }}</dd>
+                <dt>Almuerzos diarios por trabajador</dt><dd>{{ empresa.almuerzos_diarios }}</dd>
             </dl>
         </div></div>
     </div>
     <div class="col-12 col-lg-7">
         <div class="cq-card h-100"><div class="cq-card-body d-flex flex-column justify-content-between gap-4">
             <div><div class="cq-eyebrow">Equipo</div><h2 class="cq-card-title">Trabajadores</h2><p class="cq-subtitle">{{ empresa.trabajadores.count }} trabajadores registrados.</p></div>
-            <a class="btn btn-outline-primary align-self-start" href="{% url 'trabajadores:por_empresa' empresa.pk %}">Ver trabajadores</a>
+            <div class="d-flex flex-wrap gap-2">
+                <a class="btn btn-outline-primary" href="{% url 'trabajadores:por_empresa' empresa.pk %}">Ver trabajadores</a>
+                {% if empresa.activa %}<a class="btn btn-outline-primary" href="{% url 'trabajadores:importar' empresa.pk %}">Importar desde Excel</a>{% endif %}
+            </div>
         </div></div>
     </div>
 </div>

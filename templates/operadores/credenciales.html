@@ -2,7 +2,7 @@
 {% block title %}Credenciales generadas | ComensalQR{% endblock %}
 {% block content %}
 <div class="row justify-content-center"><div class="col-12 col-md-8 col-lg-6">
-    <div class="cq-banner cq-banner-success"><strong>Operador creado correctamente.</strong><br>Entrega estas credenciales al mozo autorizado.</div>
+    <div class="cq-banner cq-banner-success"><strong>{% if clave_actualizada %}Clave actualizada correctamente.{% else %}Operador creado correctamente.{% endif %}</strong><br>Entrega estas credenciales al mozo autorizado.</div>
     <div class="cq-card cq-credentials-card">
         <div class="cq-eyebrow">Credenciales de acceso</div>
         <h1>{{ operador }}</h1>

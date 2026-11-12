@@ -40,7 +40,7 @@ def editar_local(request, pk):
 def eliminar_locales(request):
     if request.method != "POST":
         return redirect("locales:lista")
-    ids = request.POST.getlist("locales")
+    ids = [value for value in request.POST.getlist("locales") if value.isdigit()]
     if not ids:
         messages.warning(request, "Selecciona al menos un local para eliminar.")
         return redirect("locales:lista")

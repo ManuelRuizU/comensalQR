@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Ingresar | ComensalQR{% endblock %}
+{# Los mensajes se muestran como banner en el formulario, no como toast. #}
+{% block toast_messages %}{% endblock %}
 {% block content %}
 <div class="row justify-content-center">
     <div class="col-12 col-sm-8 col-md-5 col-lg-4">
@@ -7,10 +9,14 @@
             <div class="card-body p-4">
                 <h1 class="h3 mb-4">Ingresar</h1>
                 {% if form.errors %}
-                    <div class="cq-banner cq-banner-danger" role="alert">Usuario o contrasena incorrectos.</div>
+                    <div class="cq-banner cq-banner-danger" role="alert">Usuario o contraseña incorrectos o cuenta no disponible.</div>
                 {% endif %}
+                {% for message in messages %}
+                    <div class="cq-banner cq-banner-danger" role="alert">{{ message }}</div>
+                {% endfor %}
                 <form method="post">
                     {% csrf_token %}
+                    {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
                     <div class="mb-3">
                         <label class="form-label" for="id_username">Usuario</label>
                         <input class="form-control" id="id_username" name="username" required autofocus>

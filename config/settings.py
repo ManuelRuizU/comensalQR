@@ -2,13 +2,21 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
+from django.core.exceptions import ImproperlyConfigured
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
-SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "dev-only-change-this-key")
-DEBUG = os.getenv("DJANGO_DEBUG", "True").lower() == "true"
+DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() == "true"
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "")
+if not SECRET_KEY:
+    if DEBUG:
+        SECRET_KEY = "dev-only-change-this-key"
+    else:
+        raise ImproperlyConfigured("DJANGO_SECRET_KEY debe configurarse fuera de desarrollo.")
+if not DEBUG and len(SECRET_KEY) < 50:
+    raise ImproperlyConfigured("DJANGO_SECRET_KEY debe tener al menos 50 caracteres fuera de desarrollo.")
 ALLOWED_HOSTS = [
     host.strip()
     for host in os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1,0.0.0.0").split(",")
@@ -19,6 +27,29 @@ CSRF_TRUSTED_ORIGINS = [
     for origin in os.getenv("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",")
     if origin.strip()
 ]
+
+if os.getenv("DJANGO_TRUST_X_FORWARDED_PROTO", "False").lower() == "true":
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+LOGIN_RATE_LIMIT_IP_HEADER = os.getenv("DJANGO_TRUSTED_PROXY_IP_HEADER", "").strip() or None
+LOGIN_RATE_LIMIT_TRUSTED_PROXY_IPS = tuple(
+    ip.strip()
+    for ip in os.getenv("DJANGO_TRUSTED_PROXY_IPS", "").split(",")
+    if ip.strip()
+)
+
+SESSION_COOKIE_SECURE = os.getenv(
+    "DJANGO_SESSION_COOKIE_SECURE", "False" if DEBUG else "True"
+).lower() == "true"
+CSRF_COOKIE_SECURE = os.getenv(
+    "DJANGO_CSRF_COOKIE_SECURE", "False" if DEBUG else "True"
+).lower() == "true"
+SECURE_SSL_REDIRECT = os.getenv(
+    "DJANGO_SECURE_SSL_REDIRECT", "False" if DEBUG else "True"
+).lower() == "true"
+SECURE_HSTS_SECONDS = int(os.getenv("DJANGO_SECURE_HSTS_SECONDS", "0" if DEBUG else "31536000"))
+SECURE_HSTS_INCLUDE_SUBDOMAINS = os.getenv(
+    "DJANGO_SECURE_HSTS_INCLUDE_SUBDOMAINS", "False"
+).lower() == "true"
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -56,6 +87,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "config.context_processors.version_estaticos",
             ],
         },
     },

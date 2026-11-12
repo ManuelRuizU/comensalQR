@@ -74,10 +74,26 @@ Puede:
 
 - Abrir el escáner.
 - Escanear un QR.
-- Ver el nombre del trabajador.
-- Ver la empresa.
-- Saber si puede registrar el almuerzo.
-- Registrar el consumo.
+- Ver el nombre del trabajador, la empresa y el resultado.
+
+Un QR válido registra el consumo automáticamente si el trabajador aún tiene
+cupo diario («Almuerzo 1 de 2 registrado»). Si el cupo está agotado, el sistema
+lo informa y no crea otro registro.
+
+El escáner ocupa toda la pantalla del teléfono: el resultado aparece en grande
+sobre la cámara (verde **Registrado**, naranja **Cupo agotado**, rojo **No válido**)
+con sonido y vibración distintos, y la cámara nunca se pausa, por lo que el
+siguiente trabajador puede escanear de inmediato. Arriba se muestra el total de
+almuerzos del día; abajo están la linterna (si el teléfono la tiene), el registro
+manual y los últimos 5 registros del operador. La pantalla no se apaga mientras
+el escáner está abierto.
+
+**Registro manual por RUT:** si el trabajador no trae ni tarjeta ni teléfono, el
+operador busca su RUT y elige la empresa. El consumo respeta el mismo cupo, queda
+marcado como «manual» en el historial y registra qué operador lo hizo.
+
+El operador solo consulta el historial del día en curso. El administrador
+puede desactivar operadores o asignarles una clave nueva desde **Operadores**.
 
 El operador no debe tener acceso a información administrativa innecesaria.
 
@@ -137,6 +153,32 @@ worker_token = 8f72a91c-4e21-...
 
 El teléfono del operador escanea el código y consulta al sistema.
 
+### Importación masiva de trabajadores
+
+Desde el listado de trabajadores de una empresa (o su perfil), **Importar desde Excel** permite cargar la nómina completa:
+
+1. Descarga la plantilla Excel (columnas `nombre`, `apellido`, `rut` y `almuerzos_diarios` opcional).
+2. Sube el archivo `.xlsx` o `.csv` (se aceptan `,` y `;`, y codificación UTF-8 o la de Excel en Windows). Máximo 2 MB y 2000 filas.
+3. Revisa la vista previa. Si alguna fila tiene errores (RUT inválido, repetido en el archivo o ya vigente en la empresa, nombre faltante, cupo fuera de 1–10) no se importa nada.
+4. Confirma: se crean todos los trabajadores en una sola transacción, cada uno con su QR.
+
+### Tarjetas QR: papel y teléfono
+
+Cada trabajador recibe el **mismo QR en dos formatos**, para que uno respalde al otro:
+
+- **Tarjeta impresa:** PDF A4 con 6 tarjetas por hoja y líneas de corte.
+- **Imagen para teléfono:** PNG vertical de 1080×1920 para guardar en la galería.
+
+Se pueden descargar por trabajador, para los seleccionados en el listado, para todos los trabajadores activos de la empresa o, tras una importación, para los recién importados. Los archivos se generan al momento y no se guardan en el servidor.
+
+Si un trabajador pierde la tarjeta o el teléfono, o comparte la imagen, usa **Regenerar QR**: se invalidan ambos formatos y hay que entregarle los nuevos.
+
+### Desvinculación de trabajadores
+
+El administrador puede usar **Eliminar trabajador** desde el listado de una empresa. Esta operación es lógica: conserva el registro, el UUID QR y los consumos históricos, y almacena la fecha y el administrador que realizó la desvinculación. El trabajador queda inactivo, desaparece del listado vigente y no puede registrar nuevos consumos. Los registros desvinculados se consultan con el filtro «Ver trabajadores eliminados». La eliminación física está deshabilitada en Django Admin.
+
+Cada empresa es un universo independiente. El RUT es único **por empresa** entre trabajadores vigentes: una misma persona puede trabajar en varias empresas a la vez, con un registro, un QR y un historial separados en cada una. Si se desvincula de una empresa, solo se bloquea el QR de esa empresa.
+
 ---
 
 🍽️ Registro de consumo
@@ -163,13 +205,23 @@ Almuerzo registrado
 
 ---
 
-🚫 Prevención de doble registro
+🚫 Cupo diario de almuerzos
 
-Un trabajador solamente puede tener un consumo registrado por día en el MVP.
+Cada empresa define cuántos almuerzos diarios autoriza por trabajador
+(campo «Almuerzos diarios por trabajador», por defecto 1). En el formulario
+del trabajador se puede definir una excepción individual; si se deja vacío,
+se usa el cupo de la empresa.
 
-Si intenta registrarse nuevamente:
+Los cupos son independientes por empresa. Ejemplo: el RUT 12492336-0 con cupo
+1 en la empresa A y 2 en la empresa B puede almorzar 3 veces al día: 1 pagado
+por A y 2 pagados por B, cada uno con su propio QR.
 
-⚠️ ALMUERZO YA REGISTRADO
+Cada consumo guarda su número del día (1, 2, ...) y la base de datos impide
+dos consumos con el mismo número para el mismo trabajador y fecha.
+
+Si el cupo está agotado:
+
+⚠️ CUPO DIARIO AGOTADO (2 de 2)
 
 Juan Pérez
 Constructora ABC
@@ -177,7 +229,7 @@ Constructora ABC
 Registrado:
 13:07
 
-El sistema no debe crear un segundo consumo.
+El sistema no debe crear un consumo adicional.
 
 Esta regla debe estar protegida tanto en la lógica de la aplicación como, cuando corresponda, mediante una restricción adecuada en la base de datos.
 
@@ -225,6 +277,9 @@ Se puede consultar desde el menú Historial, con filtros por:
 - Consumos de un día.
 - Consumos de una empresa.
 - Consumos de un trabajador.
+- RUT: muestra todos los consumos de la persona en todas sus empresas, con el total.
+
+El operador solo ve los consumos del día en curso.
 
 ---
 
@@ -233,6 +288,10 @@ Se puede consultar desde el menú Historial, con filtros por:
 Backend
 
 Python + Django
+
+### Protección del inicio de sesión
+
+Las claves de operador son de exactamente 6 dígitos. Los intentos se limitan por cuenta y por IP; por defecto se usa `REMOTE_ADDR`, adecuado para una conexión directa. Si el servicio se publica detrás de un proxy confiable, configura `DJANGO_TRUSTED_PROXY_IP_HEADER` con la clave WSGI del encabezado que el proxy sobrescribe (por ejemplo, `HTTP_X_REAL_IP`) y `DJANGO_TRUSTED_PROXY_IPS` con las IP de origen de los proxies. Solo se usará el encabezado si la conexión viene de una de esas IP. El proxy debe eliminar cualquier valor entrante de ese encabezado y escribir una única IP validada; no confíes en encabezados enviados directamente por el cliente. Si la infraestructura aún no está definida, deja ambas variables vacías.
 
 Base de datos
 

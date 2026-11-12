@@ -52,7 +52,9 @@ def eliminar_empresas(request):
     if request.method != "POST":
         return redirect("empresas:lista")
 
-    empresa_ids = request.POST.getlist("empresas")
+    empresa_ids = [
+        value for value in request.POST.getlist("empresas") if value.isdigit()
+    ]
     if not empresa_ids:
         messages.warning(request, "Selecciona al menos una empresa para eliminar.")
         return redirect("empresas:lista")

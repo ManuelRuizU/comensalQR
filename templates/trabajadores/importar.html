@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Importar trabajadores | ComensalQR{% endblock %}
+{% block content %}
+<div class="cq-heading">
+    <div><div class="cq-eyebrow">Importación masiva</div><h1>Importar trabajadores</h1><p class="cq-subtitle">Empresa: {{ empresa.nombre }} · cupo por defecto: {{ empresa.almuerzos_diarios }} almuerzo(s) diario(s).</p></div>
+    <div class="cq-actions"><a class="btn btn-outline-secondary" href="{% url 'trabajadores:por_empresa' empresa.pk %}">Volver a trabajadores</a></div>
+</div>
+
+{% if not token %}
+<div class="cq-card mb-4"><div class="cq-card-body">
+    <ol class="mb-3">
+        <li>Descarga la <a href="{% url 'trabajadores:plantilla' %}">plantilla Excel</a> y completa una fila por trabajador: <strong>nombre, apellido, rut</strong> y, opcionalmente, <strong>almuerzos_diarios</strong>.</li>
+        <li>Sube el archivo (.xlsx o .csv). Verás una vista previa antes de guardar.</li>
+        <li>Si alguna fila tiene errores no se importa nada: corrige el archivo y vuelve a subirlo.</li>
+    </ol>
+    <form method="post" enctype="multipart/form-data" class="d-flex flex-wrap gap-2 align-items-end">
+        {% csrf_token %}
+        <div><label class="form-label" for="archivo">Archivo de trabajadores</label><input class="form-control" type="file" id="archivo" name="archivo" accept=".xlsx,.csv" required></div>
+        <button class="btn btn-primary" type="submit">Revisar archivo</button>
+    </form>
+    {% if error %}<div class="cq-banner cq-banner-danger mt-3" role="alert">{{ error }}</div>{% endif %}
+</div></div>
+{% endif %}
+
+{% if filas %}
+<div class="cq-card">
+    {% if con_errores %}
+        <div class="cq-banner cq-banner-danger" role="alert"><strong>{{ con_errores }} fila(s) con errores.</strong> No se importó ningún trabajador. Corrige el archivo y vuelve a subirlo.</div>
+    {% else %}
+        <div class="cq-banner cq-banner-success"><strong>{{ validas }} trabajador(es) listos para importar.</strong> Revisa la lista y confirma.</div>
+    {% endif %}
+    <div class="cq-table-wrap"><table class="table cq-table">
+        <thead><tr><th>Fila</th><th>Nombre</th><th>Apellido</th><th>RUT</th><th>Almuerzos/día</th><th>Estado</th></tr></thead>
+        <tbody>
+            {% for fila in filas %}
+            <tr{% if not fila.valida %} class="table-danger"{% endif %}>
+                <td>{{ fila.numero }}</td><td>{{ fila.nombre }}</td><td>{{ fila.apellido }}</td><td>{{ fila.rut }}</td>
+                <td>{% if fila.almuerzos_diarios %}{{ fila.almuerzos_diarios }}{% else %}<span class="text-secondary">{{ empresa.almuerzos_diarios }} (empresa)</span>{% endif %}</td>
+                <td>{% if fila.valida %}<span class="badge text-bg-success">OK</span>{% else %}{% for error in fila.errores %}<div class="text-danger">{{ error }}</div>{% endfor %}{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table></div>
+    {% if token %}
+        <form method="post" class="cq-form-actions">
+            {% csrf_token %}
+            <input type="hidden" name="accion" value="confirmar">
+            <input type="hidden" name="token" value="{{ token }}">
+            <button class="btn btn-primary" type="submit">Importar {{ validas }} trabajador(es)</button>
+            <a class="btn btn-outline-secondary" href="{% url 'trabajadores:importar' empresa.pk %}">Cancelar</a>
+        </form>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}

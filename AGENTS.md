@@ -21,12 +21,16 @@ Permitir que un restaurante registre mediante QR:
 - Trabajadores
 - Usuario administrador
 - Usuario operador
-- QR único por trabajador
-- Escáner QR
+- QR único por trabajador (un QR por cada registro trabajador-empresa)
+- Importación masiva de trabajadores desde Excel/CSV con vista previa
+- Descarga masiva de QR: PDF imprimible (6 por hoja A4) e imágenes para teléfono (ZIP)
+- Escáner QR de pantalla completa (contador del día, últimos 5 registros, linterna, pantalla siempre encendida)
+- Registro manual por RUT como respaldo (queda marcado como «manual» y con el operador)
 - Registro de consumo
-- Prevención de doble consumo diario
+- Cupo diario de almuerzos por empresa (con excepción por trabajador) y bloqueo al agotarlo
 - Dashboard básico
-- Historial de consumos
+- Historial de consumos (búsqueda por RUT; el operador solo ve el día en curso)
+- Gestión de operadores (activar/desactivar y cambiar clave)
 
 ## NO implementar todavía
 
@@ -86,9 +90,24 @@ El operador debe poder:
 
 1. Abrir escáner.
 2. Escanear QR.
-3. Ver nombre + empresa.
-4. Saber si puede registrar.
-5. Registrar consumo.
+3. El sistema muestra nombre + empresa y el resultado del registro.
+
+Al escanear un QR válido, el consumo se registra automáticamente si el
+trabajador aún tiene cupo diario. Si el cupo está agotado, se informa y no se
+crea otro registro.
+
+## Reglas de empresas y cupos
+
+- Cada empresa es un universo independiente: paga y ve solo sus consumos.
+- Una misma persona (mismo RUT) puede estar vigente en varias empresas; tiene
+  un registro y un QR distintos en cada una. El RUT es único por empresa entre
+  trabajadores vigentes.
+- Cada empresa define cuántos almuerzos diarios autoriza por trabajador
+  (por defecto 1); un trabajador puede tener una excepción individual.
+- Los cupos son independientes por empresa. Ejemplo: RUT 12492336-0 con cupo 1
+  en A y 2 en B puede almorzar 3 veces al día (1 pagado por A, 2 por B).
+- Si se desvincula de una empresa, su QR de esa empresa queda bloqueado; sus
+  QR de otras empresas siguen funcionando.
 
 El proceso debe tomar pocos segundos.
 

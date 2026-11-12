@@ -6,29 +6,49 @@
         <div class="cq-eyebrow">Directorio</div><h1>Trabajadores</h1>
         {% if empresa %}<p class="cq-subtitle">Empresa: {{ empresa.nombre }}</p>{% endif %}
     </div>
-    <div class="cq-actions"><a class="btn btn-primary" href="{% url 'trabajadores:crear' %}">Agregar trabajador</a></div>
+    <div class="cq-actions">
+        <a class="btn btn-primary" href="{% url 'trabajadores:crear' %}">Agregar trabajador</a>
+        {% if empresa %}<a class="btn btn-outline-primary" href="{% url 'trabajadores:importar' empresa.pk %}">Importar desde Excel</a>{% endif %}
+    </div>
 </div>
 <div class="cq-card">
+    <div class="d-flex justify-content-end mb-3">
+        {% if ver_eliminados %}
+            <a class="btn btn-outline-secondary btn-sm" href="{% if empresa %}{% url 'trabajadores:por_empresa' empresa.pk %}{% else %}{% url 'trabajadores:lista' %}{% endif %}">Ver trabajadores vigentes</a>
+        {% else %}
+            <a class="btn btn-outline-secondary btn-sm" href="?estado=eliminados">Ver trabajadores eliminados</a>
+        {% endif %}
+    </div>
+    {% for trabajador in trabajadores %}
+        {% if trabajador.activo and not trabajador.eliminado_en and not ver_eliminados %}
+            <form id="regenerar-qr-{{ trabajador.pk }}" method="post" action="{% url 'trabajadores:regenerar_qr' trabajador.pk %}" data-confirm-message="El QR actual dejará de funcionar, tanto en la tarjeta impresa como en la imagen del teléfono. Deberás entregar el nuevo. ¿Deseas generarlo?" class="d-none">
+                {% csrf_token %}
+            </form>
+        {% endif %}
+    {% endfor %}
     {% if empresa %}
-        <form method="post" action="{% url 'trabajadores:eliminar' empresa.pk %}" id="delete-workers-form" data-confirm-message="Se eliminarán los trabajadores seleccionados y esta acción no se puede deshacer. ¿Deseas continuar?">
+        <form method="post" action="{% url 'trabajadores:eliminar' empresa.pk %}" id="delete-workers-form">
             {% csrf_token %}
-            <div class="cq-bulk-actions">
+            {% if not ver_eliminados %}<div class="cq-bulk-actions">
                 <label class="cq-switch cq-switch-compact mb-0"><input id="select-all-workers" type="checkbox"> <span class="cq-switch-track" aria-hidden="true"></span><span>Seleccionar todos</span></label>
-                <button class="btn btn-outline-danger btn-sm" type="submit">Eliminar seleccionados</button>
-            </div>
+                <span class="text-secondary small">QR de los seleccionados (o de todos si no marcas ninguno):</span>
+                <a class="btn btn-outline-primary btn-sm" data-descarga-qr href="{% url 'trabajadores:qr_pdf' empresa.pk %}">Imprimir (PDF)</a>
+                <a class="btn btn-outline-primary btn-sm" data-descarga-qr href="{% url 'trabajadores:qr_zip' empresa.pk %}">Imágenes teléfono (ZIP)</a>
+                <button class="btn btn-outline-danger btn-sm" type="submit">Eliminar trabajador</button>
+            </div>{% endif %}
             <div class="cq-table-wrap">
                 <table class="table cq-table">
-                    <thead><tr><th></th><th>Nombre</th><th>RUT</th><th>Empresa</th><th>Estado</th><th>QR</th></tr></thead>
+                    <thead><tr><th></th><th>Nombre</th><th>RUT</th><th>Empresa</th><th>Almuerzos/día</th><th>Estado</th><th>QR</th></tr></thead>
                     <tbody>
                         {% for trabajador in trabajadores %}
                             <tr>
-                                <td><label class="cq-switch cq-switch-table"><input class="worker-checkbox" name="trabajadores" value="{{ trabajador.pk }}" type="checkbox"><span class="cq-switch-track" aria-hidden="true"></span><span class="visually-hidden">Seleccionar {{ trabajador }}</span></label></td>
-                                <td class="fw-semibold">{{ trabajador }}</td><td>{{ trabajador.rut }}</td><td>{{ trabajador.empresa }}</td>
-                                <td>{% if trabajador.activo %}<span class="badge text-bg-success">Activo</span>{% else %}<span class="badge text-bg-secondary">Inactivo</span>{% endif %}</td>
-                                <td><a class="btn btn-sm btn-outline-primary" href="{% url 'trabajadores:qr' trabajador.pk %}">Descargar tarjeta QR</a></td>
+                                <td>{% if not ver_eliminados %}<label class="cq-switch cq-switch-table"><input class="worker-checkbox" name="trabajadores" value="{{ trabajador.pk }}" type="checkbox"><span class="cq-switch-track" aria-hidden="true"></span><span class="visually-hidden">Seleccionar {{ trabajador }}</span></label>{% endif %}</td>
+                                <td class="fw-semibold">{{ trabajador }}</td><td>{{ trabajador.rut }}</td><td>{{ trabajador.empresa }}</td><td>{{ trabajador.cupo_diario }}{% if trabajador.almuerzos_diarios %} <span class="badge text-bg-info">excepción</span>{% endif %}</td>
+                                <td>{% if trabajador.eliminado_en %}<span class="badge text-bg-danger">Eliminado · {{ trabajador.eliminado_en|date:'d/m/Y' }}</span>{% elif trabajador.activo %}<span class="badge text-bg-success">Activo</span>{% else %}<span class="badge text-bg-secondary">Inactivo</span>{% endif %}</td>
+                                <td>{% if not trabajador.eliminado_en %}<a class="btn btn-sm btn-outline-primary" href="{% url 'trabajadores:qr' trabajador.pk %}">Tarjeta impresa</a><a class="btn btn-sm btn-outline-primary" href="{% url 'trabajadores:qr_telefono' trabajador.pk %}">Imagen teléfono</a>{% if trabajador.activo %}<button class="btn btn-sm btn-outline-danger" type="submit" form="regenerar-qr-{{ trabajador.pk }}">Regenerar QR</button>{% endif %}{% endif %}</td>
                             </tr>
                         {% empty %}
-                            <tr><td colspan="6" class="text-secondary">Esta empresa no tiene trabajadores registrados.</td></tr>
+                            <tr><td colspan="7" class="text-secondary">Esta empresa no tiene trabajadores registrados.</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -37,8 +57,8 @@
     {% else %}
         <div class="cq-table-wrap">
             <table class="table cq-table">
-                <thead><tr><th>Nombre</th><th>RUT</th><th>Empresa</th><th>Estado</th><th>QR</th></tr></thead>
-                <tbody>{% for trabajador in trabajadores %}<tr><td class="fw-semibold">{{ trabajador }}</td><td>{{ trabajador.rut }}</td><td>{{ trabajador.empresa }}</td><td>{% if trabajador.activo %}<span class="badge text-bg-success">Activo</span>{% else %}<span class="badge text-bg-secondary">Inactivo</span>{% endif %}</td><td><a class="btn btn-sm btn-outline-primary" href="{% url 'trabajadores:qr' trabajador.pk %}">Descargar tarjeta QR</a></td></tr>{% empty %}<tr><td colspan="5" class="text-secondary">No hay trabajadores registrados.</td></tr>{% endfor %}</tbody>
+                <thead><tr><th>Nombre</th><th>RUT</th><th>Empresa</th><th>Almuerzos/día</th><th>Estado</th><th>QR</th></tr></thead>
+                <tbody>{% for trabajador in trabajadores %}<tr><td class="fw-semibold">{{ trabajador }}</td><td>{{ trabajador.rut }}</td><td>{{ trabajador.empresa }}</td><td>{{ trabajador.cupo_diario }}{% if trabajador.almuerzos_diarios %} <span class="badge text-bg-info">excepción</span>{% endif %}</td><td>{% if trabajador.eliminado_en %}<span class="badge text-bg-danger">Eliminado · {{ trabajador.eliminado_en|date:'d/m/Y' }}</span>{% elif trabajador.activo %}<span class="badge text-bg-success">Activo</span>{% else %}<span class="badge text-bg-secondary">Inactivo</span>{% endif %}</td><td>{% if not trabajador.eliminado_en %}<a class="btn btn-sm btn-outline-primary" href="{% url 'trabajadores:qr' trabajador.pk %}">Tarjeta impresa</a><a class="btn btn-sm btn-outline-primary" href="{% url 'trabajadores:qr_telefono' trabajador.pk %}">Imagen teléfono</a>{% if trabajador.activo %}<button class="btn btn-sm btn-outline-danger" type="submit" form="regenerar-qr-{{ trabajador.pk }}">Regenerar QR</button>{% endif %}{% endif %}</td></tr>{% empty %}<tr><td colspan="6" class="text-secondary">No hay trabajadores registrados.</td></tr>{% endfor %}</tbody>
             </table>
         </div>
     {% endif %}
@@ -47,13 +67,25 @@
     const selectAll = document.getElementById("select-all-workers");
     const workerCheckboxes = document.querySelectorAll(".worker-checkbox");
     const deleteForm = document.getElementById("delete-workers-form");
-    selectAll.addEventListener("change", () => workerCheckboxes.forEach((checkbox) => { checkbox.checked = selectAll.checked; }));
-    deleteForm.addEventListener("submit", (event) => {
+    // Las descargas usan GET con los IDs marcados (sin enviar el token CSRF en la URL).
+    document.querySelectorAll("[data-descarga-qr]").forEach((enlace) => enlace.addEventListener("click", (event) => {
+        const marcados = Array.from(document.querySelectorAll(".worker-checkbox:checked"), (checkbox) => checkbox.value);
+        if (!marcados.length) return;
+        event.preventDefault();
+        const url = new URL(enlace.href, window.location.origin);
+        marcados.forEach((id) => url.searchParams.append("trabajadores", id));
+        window.location.href = url.toString();
+    }));
+    if (selectAll) selectAll.addEventListener("change", () => workerCheckboxes.forEach((checkbox) => { checkbox.checked = selectAll.checked; }));
+    if (deleteForm) deleteForm.addEventListener("submit", (event) => {
         const selected = document.querySelectorAll(".worker-checkbox:checked").length;
         if (!selected) {
             event.preventDefault();
             window.cqShowToast("Selecciona al menos un trabajador para eliminar.", "warning");
             return;
+        }
+        if (!window.confirm("El trabajador quedará eliminado de la operación y no podrá registrar nuevos consumos. ¿Deseas continuar?")) {
+            event.preventDefault();
         }
     });
 </script>{% endif %}

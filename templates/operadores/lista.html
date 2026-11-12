@@ -7,9 +7,9 @@
 </div>
 <div class="cq-card">
     <div class="cq-table-wrap"><table class="table cq-table">
-        <thead><tr><th>Nombre</th><th>Usuario</th><th>Estado</th></tr></thead>
+        <thead><tr><th>Nombre</th><th>Usuario</th><th>Estado</th><th></th></tr></thead>
         <tbody>
-            {% for operador in operadores %}<tr><td class="fw-semibold">{{ operador }}</td><td>{{ operador.usuario.username }}</td><td>{% if operador.activo %}<span class="badge text-bg-success">Activo</span>{% else %}<span class="badge text-bg-secondary">Inactivo</span>{% endif %}</td></tr>{% empty %}<tr><td colspan="3" class="text-secondary">No hay operadores registrados.</td></tr>{% endfor %}
+            {% for operador in operadores %}<tr><td class="fw-semibold">{{ operador }}</td><td>{{ operador.usuario.username }}</td><td>{% if operador.activo %}<span class="badge text-bg-success">Activo</span>{% else %}<span class="badge text-bg-secondary">Inactivo</span>{% endif %}</td><td><a class="btn btn-sm btn-outline-primary" href="{% url 'operadores:editar' operador.pk %}">Editar</a></td></tr>{% empty %}<tr><td colspan="4" class="text-secondary">No hay operadores registrados.</td></tr>{% endfor %}
         </tbody>
     </table></div>
 </div>

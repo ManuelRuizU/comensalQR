@@ -1,11 +1,16 @@
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from .access_control import (
     MAX_INTENTOS_POR_CUENTA,
     MAX_INTENTOS_POR_CUENTA_IP,
     MENSAJE_LOGIN_INVALIDO,
+    VENTANA,
+    _obtener_bloqueado,
 )
 from .forms import OperadorForm
 from .models import IntentoAcceso, Operador
@@ -123,6 +128,35 @@ class AccesoOperadorTests(TestCase):
             )
 
         self.assertTrue(IntentoAcceso.objects.filter(bloqueado_hasta__isnull=False).exists())
+
+    def test_bloqueo_vigente_no_se_levanta_al_vencer_la_ventana(self):
+        ahora = timezone.now()
+        bloqueado_hasta = ahora + timedelta(minutes=5)
+        IntentoAcceso.objects.create(
+            clave="cuenta-bloqueada",
+            intentos=MAX_INTENTOS_POR_CUENTA,
+            ventana_desde=ahora - VENTANA - timedelta(minutes=1),
+            bloqueado_hasta=bloqueado_hasta,
+        )
+
+        intento = _obtener_bloqueado("cuenta-bloqueada", ahora)
+
+        self.assertEqual(intento.bloqueado_hasta, bloqueado_hasta)
+        self.assertEqual(intento.intentos, MAX_INTENTOS_POR_CUENTA)
+
+    def test_ventana_vencida_sin_bloqueo_se_reinicia(self):
+        ahora = timezone.now()
+        IntentoAcceso.objects.create(
+            clave="cuenta-libre",
+            intentos=3,
+            ventana_desde=ahora - VENTANA - timedelta(minutes=1),
+            bloqueado_hasta=ahora - timedelta(minutes=1),
+        )
+
+        intento = _obtener_bloqueado("cuenta-libre", ahora)
+
+        self.assertEqual(intento.intentos, 0)
+        self.assertIsNone(intento.bloqueado_hasta)
 
 
 class CreacionOperadorTests(TestCase):

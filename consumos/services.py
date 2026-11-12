@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from django.db import IntegrityError, transaction
+from django.db.models import Max
 from django.utils import timezone
 
 from trabajadores.models import Trabajador
@@ -55,12 +56,15 @@ def registrar_consumo_diario(trabajador_id, operador, fecha=None, metodo=Consumo
         if usados >= cupo:
             return ResultadoConsumo(consumos_dia.order_by("-numero").first(), False, usados, cupo)
 
+        # El número siguiente se toma del máximo existente (no del conteo) para que un
+        # hueco en la numeración no provoque una colisión y un falso «cupo agotado».
+        ultimo_numero = consumos_dia.aggregate(maximo=Max("numero"))["maximo"] or 0
         try:
             with transaction.atomic():
                 consumo = Consumo.objects.create(
                     trabajador=trabajador,
                     fecha=fecha,
-                    numero=usados + 1,
+                    numero=ultimo_numero + 1,
                     operador=operador,
                     metodo=metodo,
                 )

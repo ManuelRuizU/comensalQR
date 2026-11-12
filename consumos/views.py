@@ -83,8 +83,12 @@ def historial(request):
         "consumos": pagina,
         "es_admin": es_admin,
         "empresas": Empresa.objects.all(),
+        # Solo se listan los trabajadores de la empresa elegida: cargar la nómina
+        # completa de todas las empresas haría la página lenta.
         "trabajadores": (
-            Trabajador.objects.select_related("empresa").all() if es_admin else Trabajador.objects.none()
+            Trabajador.objects.filter(empresa_id=int(empresa_id))
+            if es_admin and empresa_id.isdigit()
+            else Trabajador.objects.none()
         ),
         "fecha_seleccionada": fecha,
         "empresa_seleccionada": empresa_id,

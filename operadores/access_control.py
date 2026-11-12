@@ -58,7 +58,10 @@ def _obtener_bloqueado(clave, ahora):
                 intento = IntentoAcceso.objects.create(clave=clave, ventana_desde=ahora)
         except IntegrityError:
             intento = IntentoAcceso.objects.select_for_update().get(clave=clave)
-    if ahora - intento.ventana_desde >= VENTANA:
+    bloqueo_vigente = intento.bloqueado_hasta is not None and intento.bloqueado_hasta > ahora
+    # La ventana solo se reinicia si no hay un bloqueo vigente: de lo contrario
+    # un bloqueo iniciado a mitad de la ventana se levantaría antes de tiempo.
+    if ahora - intento.ventana_desde >= VENTANA and not bloqueo_vigente:
         intento.intentos = 0
         intento.ventana_desde = ahora
         intento.bloqueado_hasta = None

@@ -221,6 +221,26 @@ class CupoDiarioPorEmpresaTests(TestCase):
             [1, 2, 3],
         )
 
+    def test_hueco_en_la_numeracion_no_bloquea_el_cupo_restante(self):
+        # Quedó solo el almuerzo n.º 2 del día (p. ej. se borró el n.º 1 desde la base).
+        Consumo.objects.create(trabajador=self.en_b, fecha=timezone.localdate(), numero=2, operador=self.operador)
+        self.client.force_login(self.operador)
+
+        respuesta = self.escanear(self.en_b)
+
+        self.assertEqual(respuesta["status"], "registered")
+        self.assertEqual(respuesta["number"], 3)
+        self.assertEqual(self.escanear(self.en_b)["status"], "duplicate")
+
+    def test_historial_lista_trabajadores_solo_de_la_empresa_elegida(self):
+        self.client.force_login(self.admin)
+
+        sin_empresa = self.client.get(reverse("consumos:historial"))
+        con_empresa = self.client.get(reverse("consumos:historial"), {"empresa": self.empresa_a.pk})
+
+        self.assertEqual(list(sin_empresa.context["trabajadores"]), [])
+        self.assertEqual(list(con_empresa.context["trabajadores"]), [self.en_a])
+
     def test_rut_duplicado_en_la_misma_empresa_muestra_error_y_no_500(self):
         self.client.force_login(self.admin)
         response = self.client.post(

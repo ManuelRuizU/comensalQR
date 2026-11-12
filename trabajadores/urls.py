@@ -9,6 +9,7 @@ urlpatterns = [
     path("", views.lista_trabajadores, name="lista"),
     path("empresa/<int:empresa_id>/", views.lista_trabajadores_empresa, name="por_empresa"),
     path("empresa/<int:empresa_id>/eliminar/", views.eliminar_trabajadores, name="eliminar"),
+    path("<int:trabajador_id>/editar/", views.editar_trabajador, name="editar"),
     path("<int:trabajador_id>/qr/", views.descargar_qr, name="qr"),
     path("<int:trabajador_id>/qr/regenerar/", views.regenerar_qr, name="regenerar_qr"),
     path("<int:trabajador_id>/qr/telefono/", views.descargar_qr_telefono, name="qr_telefono"),

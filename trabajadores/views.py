@@ -57,6 +57,18 @@ def crear_trabajador(request):
     return render(request, "trabajadores/formulario.html", {"form": form})
 
 
+@user_passes_test(es_administrador, login_url="login")
+def editar_trabajador(request, trabajador_id):
+    # Un trabajador eliminado no se edita: su registro queda como respaldo histórico.
+    trabajador = get_object_or_404(Trabajador, pk=trabajador_id, eliminado_en__isnull=True)
+    form = TrabajadorForm(request.POST or None, instance=trabajador)
+    if request.method == "POST" and form.is_valid():
+        form.save()
+        messages.success(request, f"Trabajador {trabajador} actualizado correctamente.")
+        return redirect("trabajadores:por_empresa", empresa_id=trabajador.empresa_id)
+    return render(request, "trabajadores/formulario.html", {"form": form, "trabajador": trabajador})
+
+
 def _respuesta_archivo(contenido, tipo, nombre_archivo):
     response = HttpResponse(contenido, content_type=tipo)
     response["Content-Disposition"] = f'attachment; filename="{nombre_archivo}"'

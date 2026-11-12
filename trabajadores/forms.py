@@ -19,6 +19,10 @@ class TrabajadorForm(forms.ModelForm):
                 Q(activa=True) | Q(pk=self.instance.empresa_id)
             )
         self.fields["empresa"].queryset = empresas_activas
+        if self.instance.pk and self.instance.consumos.exists():
+            # Sus consumos ya se cobran a esta empresa: cambiarla alteraría el historial.
+            self.fields["empresa"].disabled = True
+            self.fields["empresa"].help_text = "No se puede cambiar: el trabajador ya tiene consumos registrados."
 
     class Meta:
         model = Trabajador

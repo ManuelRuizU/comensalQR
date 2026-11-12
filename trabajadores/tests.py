@@ -469,3 +469,88 @@ class ImportacionYDescargaMasivaTests(TestCase):
         response = self.client.get(reverse("trabajadores:qr_telefono", args=[trabajador.pk]))
         self.assertEqual(response["Content-Type"], "image/png")
         self.assertEqual(Image.open(BytesIO(response.content)).size, (1080, 1920))
+
+
+class EditarTrabajadorTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.admin = User.objects.create_user(username="admin-edit", password="x", is_staff=True)
+        self.operador = User.objects.create_user(username="mozo-edit", password="x")
+        Operador.objects.create(usuario=self.operador)
+        self.empresa = Empresa.objects.create(
+            nombre="Empresa Edit", rut="76111111-6", direccion="Dir", encargado_personal="RRHH"
+        )
+        self.otra_empresa = Empresa.objects.create(
+            nombre="Otra Empresa", rut="76222222-1", direccion="Dir", encargado_personal="RRHH"
+        )
+        self.trabajador = Trabajador.objects.create(
+            nombre="Ana", apellido="Pérez", rut="11111111-1", empresa=self.empresa
+        )
+        self.url = reverse("trabajadores:editar", args=[self.trabajador.pk])
+
+    def datos(self, **cambios):
+        datos = {
+            "empresa": self.empresa.pk,
+            "nombre": "Ana",
+            "apellido": "Pérez",
+            "rut": "11111111-1",
+            "almuerzos_diarios": "",
+            "activo": "on",
+        }
+        datos.update(cambios)
+        return {clave: valor for clave, valor in datos.items() if valor is not None}
+
+    def test_asignar_excepcion_de_cupo_y_desactivar(self):
+        self.client.force_login(self.admin)
+        token = self.trabajador.token_qr
+
+        response = self.client.post(self.url, self.datos(almuerzos_diarios=2, activo=None))
+
+        self.assertRedirects(response, reverse("trabajadores:por_empresa", args=[self.empresa.pk]))
+        self.trabajador.refresh_from_db()
+        self.assertEqual(self.trabajador.cupo_diario, 2)
+        self.assertFalse(self.trabajador.activo)
+        self.assertEqual(self.trabajador.token_qr, token)
+
+    def test_no_cambia_de_empresa_si_tiene_consumos(self):
+        Consumo.objects.create(trabajador=self.trabajador, fecha=date(2026, 10, 1), operador=self.operador)
+        self.client.force_login(self.admin)
+
+        self.client.post(self.url, self.datos(empresa=self.otra_empresa.pk))
+
+        self.trabajador.refresh_from_db()
+        self.assertEqual(self.trabajador.empresa, self.empresa)
+
+    def test_cambia_de_empresa_si_no_tiene_consumos(self):
+        self.client.force_login(self.admin)
+
+        self.client.post(self.url, self.datos(empresa=self.otra_empresa.pk))
+
+        self.trabajador.refresh_from_db()
+        self.assertEqual(self.trabajador.empresa, self.otra_empresa)
+
+    def test_rut_duplicado_en_la_empresa_muestra_error(self):
+        Trabajador.objects.create(nombre="Luis", apellido="Rojas", rut="22222222-2", empresa=self.empresa)
+        self.client.force_login(self.admin)
+
+        response = self.client.post(self.url, self.datos(rut="22.222.222-2"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("rut", response.context["form"].errors)
+
+    def test_trabajador_eliminado_no_se_puede_editar(self):
+        self.trabajador.activo = False
+        self.trabajador.eliminado_en = timezone.now()
+        self.trabajador.save(update_fields=["activo", "eliminado_en"])
+        self.client.force_login(self.admin)
+
+        self.assertEqual(self.client.get(self.url).status_code, 404)
+
+    def test_operador_no_puede_editar(self):
+        self.client.force_login(self.operador)
+
+        response = self.client.post(self.url, self.datos(almuerzos_diarios=5))
+
+        self.assertEqual(response.status_code, 302)
+        self.trabajador.refresh_from_db()
+        self.assertIsNone(self.trabajador.almuerzos_diarios)

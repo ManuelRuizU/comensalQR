@@ -1,9 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Nuevo trabajador | ComensalQR{% endblock %}
+{% block title %}{% if trabajador %}Editar trabajador{% else %}Nuevo trabajador{% endif %} | ComensalQR{% endblock %}
 {% block content %}
 <div class="row justify-content-center"><div class="col-12 col-md-8 col-lg-7">
     <div class="cq-heading">
-        <div><div class="cq-eyebrow">Directorio</div><h1>Agregar trabajador</h1><p class="cq-subtitle">Asigna el trabajador a su empresa.</p></div>
+        {% if trabajador %}
+            <div><div class="cq-eyebrow">Directorio</div><h1>Editar trabajador</h1><p class="cq-subtitle">{{ trabajador }} · {{ trabajador.empresa }}. Deja vacío el cupo para usar el de la empresa.</p></div>
+        {% else %}
+            <div><div class="cq-eyebrow">Directorio</div><h1>Agregar trabajador</h1><p class="cq-subtitle">Asigna el trabajador a su empresa.</p></div>
+        {% endif %}
     </div>
     <form method="post" class="cq-card cq-form-card">
         {% csrf_token %}
@@ -13,9 +17,10 @@
                 {{ field.errors }}
                 {{ field.label_tag }}
                 {{ field }}
+                {% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}
             </div>
         {% endfor %}
-        <div class="cq-form-actions"><button class="btn btn-primary" type="submit">Guardar</button><a class="btn btn-outline-secondary" href="{% url 'trabajadores:lista' %}">Cancelar</a></div>
+        <div class="cq-form-actions"><button class="btn btn-primary" type="submit">Guardar</button><a class="btn btn-outline-secondary" href="{% if trabajador %}{% url 'trabajadores:por_empresa' trabajador.empresa_id %}{% else %}{% url 'trabajadores:lista' %}{% endif %}">Cancelar</a></div>
     </form>
 </div></div>
 {% endblock %}

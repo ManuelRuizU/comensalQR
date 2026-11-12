@@ -16,11 +16,13 @@ Permitir que un restaurante registre mediante QR:
 
 ## Funcionalidades permitidas en MVP v0.1
 
-- Local (cada operador pertenece a un local y el consumo registra el local)
+- Local (hoy: un restaurante con un local; el modelo admite más de uno)
+- Registro inicial web: si no hay administradores, se crea el local y su administrador
 - Empresas
 - Trabajadores
-- Usuario administrador
-- Usuario operador
+- Usuario administrador (ingresa con correo; ve todo y escanea en su local; gestión de administradores)
+- Usuario operador / garzón (ingresa con usuario y clave de 8 dígitos; escanea en su local)
+- El consumo registra el local de quien escanea
 - QR único por trabajador (un QR por cada registro trabajador-empresa)
 - Importación masiva de trabajadores desde Excel/CSV con vista previa
 - Descarga masiva de QR: PDF imprimible (6 por hoja A4) e imágenes para teléfono (ZIP)
@@ -37,7 +39,8 @@ Permitir que un restaurante registre mediante QR:
 
 No implementar sin solicitud explícita:
 
-- Menús
+- Menús (planeado para v0.2: al escanear el QR, el garzón elige el almuerzo
+  desde una lista de opciones disponibles en esa misma pantalla)
 - Costos
 - IVA
 - Rentabilidad

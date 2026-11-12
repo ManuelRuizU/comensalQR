@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Registrar restaurante | ComensalQR{% endblock %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-12 col-md-8 col-lg-7">
+    <div class="cq-heading">
+        <div><div class="cq-eyebrow">Primeros pasos</div><h1>Registrar restaurante</h1><p class="cq-subtitle">Crea el local y la cuenta del administrador. Este paso se hace una sola vez.</p></div>
+    </div>
+    <form method="post" class="cq-card cq-form-card">
+        {% csrf_token %}
+        <h2 class="h5 mb-3">Local</h2>
+        {{ form_local.non_field_errors }}
+        {% for field in form_local %}
+            <div class="cq-form-field{% if not field.field.required %} optional{% endif %} mb-3{% if field.errors %} has-error{% endif %}">{{ field.errors }}{{ field.label_tag }}{{ field }}</div>
+        {% endfor %}
+        <h2 class="h5 mb-3 mt-4">Administrador</h2>
+        {{ form_admin.non_field_errors }}
+        {% for field in form_admin %}
+            <div class="cq-form-field mb-3{% if field.errors %} has-error{% endif %}">{{ field.errors }}{{ field.label_tag }}{{ field }}{% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}</div>
+        {% endfor %}
+        <div class="cq-form-actions"><button class="btn btn-primary" type="submit">Registrar y entrar</button></div>
+    </form>
+</div></div>
+{% endblock %}

@@ -50,7 +50,8 @@ def eliminar_locales(request):
     except ProtectedError:
         messages.error(
             request,
-            "No se puede eliminar un local con operadores asignados o consumos registrados. "
+            "No se puede eliminar un local con administradores u operadores asignados, "
+            "o con consumos registrados. "
             "Puedes desactivarlo.",
         )
         return redirect("locales:lista")

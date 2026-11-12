@@ -12,6 +12,7 @@ from django.utils.dateparse import parse_date
 from empresas.models import Empresa
 from empresas.validators import normalizar_rut
 from locales.models import Local
+from operadores.models import local_de_usuario
 from trabajadores.models import Trabajador
 
 from .models import Consumo
@@ -138,6 +139,7 @@ def escaner(request):
             {
                 "total_hoy": Consumo.objects.filter(fecha=hoy).count(),
                 "ultimos": _ultimos_del_operador(request.user, hoy),
+                "local": local_de_usuario(request.user),
             },
         )
 

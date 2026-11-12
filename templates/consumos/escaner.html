@@ -13,7 +13,7 @@
                 <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
             </summary>
             <div class="cq-scan-menu-list">
-                <span class="cq-scan-menu-user">{{ request.user.get_full_name|default:request.user.get_username }}{% if request.user.perfil_operador.local %} · {{ request.user.perfil_operador.local }}{% endif %}</span>
+                <span class="cq-scan-menu-user">{{ request.user.get_full_name|default:request.user.get_username }}{% if local %} · {{ local }}{% endif %}</span>
                 <a href="{% url 'consumos:historial' %}">{% if request.user.is_staff %}Historial{% else %}Consumos de hoy{% endif %}</a>
                 {% if request.user.is_staff %}<a href="{% url 'consumos:dashboard' %}">Dashboard</a>{% endif %}
                 <button id="cq-install-pwa" type="button" hidden>Instalar app</button>

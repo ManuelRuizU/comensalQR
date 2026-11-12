@@ -28,6 +28,7 @@
                         <a class="link-light" href="{% url 'locales:lista' %}">Locales</a>
                         <a class="link-light" href="{% url 'trabajadores:lista' %}">Trabajadores</a>
                         <a class="link-light" href="{% url 'operadores:lista' %}">Operadores</a>
+                        <a class="link-light" href="{% url 'administradores:lista' %}">Administradores</a>
                     {% endif %}
                     <span>{{ request.user.get_username }}</span>
                     <form method="post" action="{% url 'logout' %}">

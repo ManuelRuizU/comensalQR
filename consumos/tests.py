@@ -12,7 +12,7 @@ from django.utils import timezone
 
 from empresas.models import Empresa
 from locales.models import Local
-from operadores.models import Operador
+from operadores.models import Administrador, Operador
 from trabajadores.models import Trabajador
 
 from .models import Consumo
@@ -62,6 +62,8 @@ class ConsumoTests(TestCase):
         self.assertRedirects(
             response,
             f"{reverse('login')}?next={reverse('consumos:dashboard')}",
+            # Sin administradores el login lleva al registro inicial (ver operadores.tests).
+            fetch_redirect_response=False,
         )
 
     def test_historial_requiere_autenticacion(self):
@@ -70,6 +72,8 @@ class ConsumoTests(TestCase):
         self.assertRedirects(
             response,
             f"{reverse('login')}?next={reverse('consumos:historial')}",
+            # Sin administradores el login lleva al registro inicial (ver operadores.tests).
+            fetch_redirect_response=False,
         )
 
     def test_historial_filtra_por_fecha(self):
@@ -337,6 +341,7 @@ class EscanerManualYContadorTests(TestCase):
 
 class VersionEstaticosTests(TestCase):
     def test_css_y_js_llevan_version_para_invalidar_cache(self):
+        get_user_model().objects.create_user(username="admin-version", password="x", is_staff=True)
         response = self.client.get(reverse("login"))
         version = response.context["static_version"]
         self.assertRegex(version, r"^[0-9a-f]{10}$")
@@ -370,13 +375,22 @@ class ConsumoPorLocalTests(TestCase):
             HTTP_X_REQUESTED_WITH="XMLHttpRequest",
         ).json()
 
-    def test_consumo_queda_en_el_local_del_operador(self):
+    def test_consumo_queda_en_el_local_de_quien_escanea(self):
         self.escanear(self.mozo_norte)
         self.escanear(self.mozo_sur)
-        self.escanear(self.admin)
+        self.escanear(self.admin)  # administrador sin local asignado
 
         locales = list(Consumo.objects.order_by("numero").values_list("local__nombre", flat=True))
         self.assertEqual(locales, ["Casino Norte", "Casino Sur", None])
+
+    def test_administrador_escanea_en_su_local(self):
+        Administrador.objects.create(usuario=self.admin, local=self.sur)
+
+        self.escanear(self.admin)
+        pantalla = self.client.get(reverse("consumos:escaner"))
+
+        self.assertEqual(Consumo.objects.get().local, self.sur)
+        self.assertContains(pantalla, "Casino Sur")
 
     def test_historial_y_dashboard_por_local(self):
         self.escanear(self.mozo_norte)

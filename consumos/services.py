@@ -4,6 +4,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import Max
 from django.utils import timezone
 
+from operadores.models import local_de_usuario
 from trabajadores.models import Trabajador
 
 from .models import Consumo
@@ -59,9 +60,8 @@ def registrar_consumo_diario(trabajador_id, operador, fecha=None, metodo=Consumo
         # El número siguiente se toma del máximo existente (no del conteo) para que un
         # hueco en la numeración no provoque una colisión y un falso «cupo agotado».
         ultimo_numero = consumos_dia.aggregate(maximo=Max("numero"))["maximo"] or 0
-        # El consumo queda en el local del operador; un administrador no tiene local.
-        perfil = getattr(operador, "perfil_operador", None)
-        local_id = perfil.local_id if perfil else None
+        # El consumo queda en el local de quien escanea (operador o administrador).
+        local = local_de_usuario(operador)
         try:
             with transaction.atomic():
                 consumo = Consumo.objects.create(
@@ -69,7 +69,7 @@ def registrar_consumo_diario(trabajador_id, operador, fecha=None, metodo=Consumo
                     fecha=fecha,
                     numero=ultimo_numero + 1,
                     operador=operador,
-                    local_id=local_id,
+                    local=local,
                     metodo=metodo,
                 )
         except IntegrityError:

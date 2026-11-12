@@ -54,7 +54,22 @@ El proceso debe ser rápido y sencillo para que pueda utilizarse durante un serv
 
 👤 Roles
 
+Puesta en marcha
+
+1. `python manage.py migrate`
+2. Abrir el sistema en el navegador. Como todavía no hay administradores, se
+   muestra **Registrar restaurante**: se ingresan los datos del local y del
+   administrador (nombre, correo y clave). Esa pantalla deja de estar
+   disponible una vez creado el primer administrador.
+3. El administrador crea empresas y trabajadores (a mano o con Excel).
+4. El administrador crea los operadores (garzones) y les asigna el local.
+
 Administrador
+
+Ingresa con su correo y clave. Está asignado a un local: si escanea, el consumo
+queda en ese local. Desde **Administradores** puede crear otros
+administradores, cambiarles el local o la clave, y desactivarlos (no puede
+desactivarse a sí mismo y siempre debe quedar uno activo).
 
 El administrador puede:
 
@@ -96,11 +111,10 @@ El operador solo consulta el historial del día en curso. El administrador
 puede desactivar operadores, cambiarles el local o asignarles una clave nueva
 desde **Operadores**.
 
-Cada operador está asignado a un local, y cada consumo guarda el local del
-operador que lo registró. El historial se puede filtrar por local y el
-dashboard muestra el total por local cuando hay más de uno. Los consumos que
-registra un administrador quedan sin local. Un local con operadores o consumos
-no se puede eliminar, solo desactivar.
+Cada operador y cada administrador está asignado a un local, y cada consumo
+guarda el local de quien lo registró. El historial se puede filtrar por local y
+el dashboard muestra el total por local cuando hay más de uno. Un local con
+administradores, operadores o consumos no se puede eliminar, solo desactivar.
 
 El operador no debe tener acceso a información administrativa innecesaria.
 

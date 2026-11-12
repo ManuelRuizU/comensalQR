@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Administradores | ComensalQR{% endblock %}
+{% block content %}
+<div class="cq-heading">
+    <div><div class="cq-eyebrow">Acceso completo</div><h1>Administradores</h1><p class="cq-subtitle">Ven toda la información y escanean en su local.</p></div>
+    <div class="cq-actions"><a class="btn btn-primary" href="{% url 'administradores:crear' %}">Agregar administrador</a></div>
+</div>
+<div class="cq-card">
+    <div class="cq-table-wrap"><table class="table cq-table">
+        <thead><tr><th>Nombre</th><th>Correo / usuario</th><th>Local</th><th>Estado</th><th></th></tr></thead>
+        <tbody>
+            {% for administrador in administradores %}<tr>
+                <td class="fw-semibold">{{ administrador.get_full_name|default:"—" }}{% if administrador == request.user %} <span class="badge text-bg-light">tú</span>{% endif %}</td>
+                <td>{{ administrador.email|default:administrador.username }}</td>
+                <td>{% if administrador.perfil_administrador %}{{ administrador.perfil_administrador.local }}{% else %}<span class="badge text-bg-warning">Sin local</span>{% endif %}</td>
+                <td>{% if administrador.is_active %}<span class="badge text-bg-success">Activo</span>{% else %}<span class="badge text-bg-secondary">Inactivo</span>{% endif %}</td>
+                <td><a class="btn btn-sm btn-outline-primary" href="{% url 'administradores:editar' administrador.pk %}">Editar</a></td>
+            </tr>{% endfor %}
+        </tbody>
+    </table></div>
+</div>
+{% endblock %}

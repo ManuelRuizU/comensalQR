@@ -1,7 +1,7 @@
 import uuid
 
 from django.contrib import messages
-from django.contrib.auth import login, logout
+from django.contrib.auth import login, logout, update_session_auth_hash
 from django.contrib.auth.decorators import user_passes_test
 from django.contrib.auth.forms import AuthenticationForm
 from django.contrib.auth.models import User
@@ -11,8 +11,16 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.text import slugify
 from django.views.decorators.cache import never_cache
 
-from .forms import OperadorEditarForm, OperadorForm
-from .models import Operador
+from locales.forms import LocalForm
+
+from .forms import (
+    AdministradorEditarForm,
+    AdministradorForm,
+    OperadorEditarForm,
+    OperadorForm,
+    normalizar_correo,
+)
+from .models import Administrador, Operador
 from .access_control import (
     MENSAJE_LOGIN_INVALIDO,
     limpiar_fallos_cuenta,
@@ -25,7 +33,15 @@ def es_administrador(user):
     return user.is_authenticated and user.is_staff
 
 
+def hay_administradores():
+    return User.objects.filter(is_staff=True).exists()
+
+
 def ingreso(request):
+    if request.method == "GET" and not hay_administradores():
+        # Instalación nueva: primero hay que registrar el restaurante y su administrador.
+        return redirect("registro_inicial")
+
     next_url = request.POST.get("next") or request.GET.get("next", "")
     if request.user.is_authenticated:
         destino = _destino_usuario(request.user)
@@ -34,12 +50,20 @@ def ingreso(request):
         logout(request)
         messages.error(request, MENSAJE_LOGIN_INVALIDO)
 
-    username = request.POST.get("username", "") if request.method == "POST" else ""
+    datos = None
+    username = ""
+    if request.method == "POST":
+        datos = request.POST.copy()
+        username = datos.get("username", "").strip()
+        if "@" in username:
+            # Los administradores ingresan con su correo, que se guarda en minúsculas.
+            username = normalizar_correo(username)
+        datos["username"] = username
     if request.method == "POST" and not reservar_intento(request, username):
         messages.error(request, MENSAJE_LOGIN_INVALIDO)
         form = AuthenticationForm(request)
     else:
-        form = AuthenticationForm(request, data=request.POST or None)
+        form = AuthenticationForm(request, data=datos)
         if request.method == "POST" and form.is_valid():
             usuario = form.get_user()
             destino = _destino_usuario(usuario)
@@ -166,4 +190,112 @@ def editar_operador(request, pk):
         request,
         "operadores/editar.html",
         {"operador": operador, "form": form},
+    )
+
+
+def _crear_usuario_administrador(datos):
+    return User.objects.create_user(
+        username=datos["correo"],
+        email=datos["correo"],
+        first_name=datos["nombre"].strip(),
+        last_name=datos["apellido"].strip(),
+        password=datos["clave"],
+        is_staff=True,
+        # «Ve todo»: también puede usar el admin de Django como respaldo.
+        is_superuser=True,
+    )
+
+
+@never_cache
+def registro_inicial(request):
+    """Primer paso de una instalación nueva: crea el local y su administrador."""
+    if hay_administradores():
+        return redirect("login")
+
+    form_local = LocalForm(request.POST or None, prefix="local")
+    form_admin = AdministradorForm(request.POST or None, prefix="admin", con_local=False)
+    form_local.fields.pop("activo", None)
+    if request.method == "POST" and form_local.is_valid() and form_admin.is_valid():
+        with transaction.atomic():
+            if hay_administradores():
+                return redirect("login")
+            local = form_local.save()
+            usuario = _crear_usuario_administrador(form_admin.cleaned_data)
+            Administrador.objects.create(usuario=usuario, local=local)
+        login(request, usuario, backend="django.contrib.auth.backends.ModelBackend")
+        messages.success(
+            request,
+            f"Restaurante «{local}» registrado. Ahora agrega empresas, trabajadores y operadores.",
+        )
+        return redirect("consumos:dashboard")
+    return render(
+        request,
+        "registration/registro_inicial.html",
+        {"form_local": form_local, "form_admin": form_admin},
+    )
+
+
+@user_passes_test(es_administrador, login_url="login")
+def lista_administradores(request):
+    administradores = (
+        User.objects.filter(is_staff=True)
+        .select_related("perfil_administrador__local")
+        .order_by("-is_active", "first_name", "last_name", "username")
+    )
+    return render(request, "administradores/lista.html", {"administradores": administradores})
+
+
+@user_passes_test(es_administrador, login_url="login")
+@never_cache
+def crear_administrador(request):
+    form = AdministradorForm(request.POST or None)
+    if request.method == "POST" and form.is_valid():
+        with transaction.atomic():
+            usuario = _crear_usuario_administrador(form.cleaned_data)
+            Administrador.objects.create(usuario=usuario, local=form.cleaned_data["local"])
+        messages.success(request, f"Administrador creado. Ingresa con el correo {usuario.email}.")
+        return redirect("administradores:lista")
+    return render(request, "administradores/formulario.html", {"form": form})
+
+
+@user_passes_test(es_administrador, login_url="login")
+@never_cache
+def editar_administrador(request, pk):
+    usuario = get_object_or_404(User.objects.select_related("perfil_administrador__local"), pk=pk, is_staff=True)
+    perfil = getattr(usuario, "perfil_administrador", None)
+    local_actual = perfil.local if perfil else None
+    form = AdministradorEditarForm(
+        request.POST or None,
+        usuario=usuario,
+        local_actual=local_actual,
+        initial={"activo": usuario.is_active, "local": local_actual.pk if local_actual else None},
+    )
+    if request.method == "POST" and form.is_valid():
+        activo = form.cleaned_data["activo"]
+        if not activo and usuario.is_active:
+            if usuario == request.user:
+                form.add_error("activo", "No puedes desactivar tu propia cuenta.")
+            elif not User.objects.filter(is_staff=True, is_active=True).exclude(pk=usuario.pk).exists():
+                form.add_error("activo", "Debe quedar al menos un administrador activo.")
+    if request.method == "POST" and form.is_valid():
+        nueva_clave = form.cleaned_data["nueva_clave"]
+        with transaction.atomic():
+            Administrador.objects.update_or_create(
+                usuario=usuario, defaults={"local": form.cleaned_data["local"]}
+            )
+            usuario.is_active = form.cleaned_data["activo"]
+            campos = ["is_active"]
+            if nueva_clave:
+                usuario.set_password(nueva_clave)
+                campos.append("password")
+            usuario.save(update_fields=campos)
+        if nueva_clave and usuario == request.user:
+            # Cambiar la propia clave cierra las demás sesiones, pero no la actual.
+            update_session_auth_hash(request, usuario)
+        messages.success(request, "Administrador actualizado correctamente.")
+        return redirect("administradores:lista")
+    return render(
+        request,
+        "administradores/formulario.html",
+        {"form": form, "administrador": usuario},
     )

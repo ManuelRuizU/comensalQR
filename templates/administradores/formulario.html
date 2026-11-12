@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{% if administrador %}Editar administrador{% else %}Nuevo administrador{% endif %} | ComensalQR{% endblock %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-12 col-md-8 col-lg-7">
+    <div class="cq-heading">
+        {% if administrador %}
+            <div><div class="cq-eyebrow">Acceso completo</div><h1>{{ administrador.get_full_name|default:administrador.username }}</h1><p class="cq-subtitle">Ingresa con <code>{{ administrador.username }}</code>. Cambia su local, desactívalo o asígnale una clave nueva.</p></div>
+        {% else %}
+            <div><div class="cq-eyebrow">Acceso completo</div><h1>Nuevo administrador</h1><p class="cq-subtitle">Podrá ver toda la información y escanear en el local asignado.</p></div>
+        {% endif %}
+        <div class="cq-actions"><a class="btn btn-outline-secondary" href="{% url 'administradores:lista' %}">Volver a administradores</a></div>
+    </div>
+    {% if not form.fields.local.queryset.exists %}<div class="cq-banner cq-banner-warning mb-3">No hay locales activos. <a href="{% url 'locales:crear' %}">Crea un local</a> antes de asignar administradores.</div>{% endif %}
+    <form method="post" class="cq-card cq-form-card">
+        {% csrf_token %}{{ form.non_field_errors }}
+        {% for field in form %}<div class="cq-form-field{% if field.field.widget.input_type == 'checkbox' %} cq-switch-field{% endif %}{% if not field.field.required %} optional{% endif %} mb-3{% if field.errors %} has-error{% endif %}">{{ field.errors }}{{ field.label_tag }}{{ field }}{% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}</div>{% endfor %}
+        <div class="cq-form-actions"><button class="btn btn-primary" type="submit">Guardar</button><a class="btn btn-outline-secondary" href="{% url 'administradores:lista' %}">Cancelar</a></div>
+    </form>
+</div></div>
+{% endblock %}

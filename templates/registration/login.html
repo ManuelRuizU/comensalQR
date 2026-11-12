@@ -18,8 +18,8 @@
                     {% csrf_token %}
                     {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
                     <div class="mb-3">
-                        <label class="form-label" for="id_username">Usuario</label>
-                        <input class="form-control" id="id_username" name="username" required autofocus>
+                        <label class="form-label" for="id_username">Usuario o correo</label>
+                        <input class="form-control" id="id_username" name="username" required autofocus autocapitalize="none" autocomplete="username">
                     </div>
                     <div class="mb-3">
                         <label class="form-label" for="id_password">Contrasena</label>

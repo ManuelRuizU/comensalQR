@@ -31,6 +31,14 @@ class Consumo(models.Model):
         on_delete=models.PROTECT,
         related_name="consumos_registrados",
     )
+    local = models.ForeignKey(
+        "locales.Local",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="consumos",
+        help_text="Local donde se registró el consumo (el del operador al momento del registro).",
+    )
 
     class Meta:
         ordering = ["-registrado_en"]

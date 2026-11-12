@@ -27,6 +27,18 @@
             {% endfor %}
         </div></div>
     </div>
+    {% if locales|length > 1 %}
+    <div class="col-12">
+        <div class="card shadow-sm"><div class="card-body">
+            <h2 class="h5">Por local</h2>
+            {% for local in locales %}
+                <div class="d-flex justify-content-between border-bottom py-2">
+                    <span>{{ local.local__nombre|default:"Sin local" }}</span><strong>{{ local.total }}</strong>
+                </div>
+            {% endfor %}
+        </div></div>
+    </div>
+    {% endif %}
 </div>
 <div class="card shadow-sm">
     <div class="card-body">

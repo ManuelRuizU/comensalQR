@@ -16,7 +16,7 @@ Permitir que un restaurante registre mediante QR:
 
 ## Funcionalidades permitidas en MVP v0.1
 
-- Local
+- Local (cada operador pertenece a un local y el consumo registra el local)
 - Empresas
 - Trabajadores
 - Usuario administrador
@@ -30,7 +30,8 @@ Permitir que un restaurante registre mediante QR:
 - Cupo diario de almuerzos por empresa (con excepción por trabajador) y bloqueo al agotarlo
 - Dashboard básico
 - Historial de consumos (búsqueda por RUT; el operador solo ve el día en curso)
-- Gestión de operadores (activar/desactivar y cambiar clave)
+- Gestión de operadores (activar/desactivar, cambiar clave y local)
+- Edición de trabajadores (datos, excepción de cupo y estado activo)
 
 ## NO implementar todavía
 

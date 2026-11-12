@@ -79,7 +79,7 @@ def _destino_usuario(usuario):
 
 @user_passes_test(es_administrador, login_url="login")
 def lista_operadores(request):
-    operadores = Operador.objects.select_related("usuario")
+    operadores = Operador.objects.select_related("usuario", "local")
     return render(request, "operadores/lista.html", {"operadores": operadores})
 
 
@@ -125,7 +125,7 @@ def crear_operador(request):
                     if not User.objects.filter(username=usuario_nombre).exists():
                         raise
                     sufijo += 1
-            operador = Operador.objects.create(usuario=usuario)
+            operador = Operador.objects.create(usuario=usuario, local=form.cleaned_data["local"])
         return render(
             request,
             "operadores/credenciales.html",
@@ -137,15 +137,17 @@ def crear_operador(request):
 @user_passes_test(es_administrador, login_url="login")
 @never_cache
 def editar_operador(request, pk):
-    operador = get_object_or_404(Operador.objects.select_related("usuario"), pk=pk)
+    operador = get_object_or_404(Operador.objects.select_related("usuario", "local"), pk=pk)
     form = OperadorEditarForm(
         request.POST if request.method == "POST" else None,
-        initial={"activo": operador.activo},
+        initial={"activo": operador.activo, "local": operador.local_id},
+        local_actual=operador.local,
     )
     if request.method == "POST" and form.is_valid():
         with transaction.atomic():
             operador.activo = form.cleaned_data["activo"]
-            operador.save(update_fields=["activo"])
+            operador.local = form.cleaned_data["local"]
+            operador.save(update_fields=["activo", "local"])
             nueva_clave = form.cleaned_data["nueva_clave"]
             if nueva_clave:
                 # Cambiar la clave invalida las sesiones abiertas del operador.

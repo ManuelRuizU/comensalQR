@@ -1,4 +1,5 @@
 from datetime import date
+from importlib import import_module
 from datetime import datetime, timezone as datetime_timezone
 from unittest.mock import patch
 
@@ -10,6 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from empresas.models import Empresa
+from locales.models import Local
 from operadores.models import Operador
 from trabajadores.models import Trabajador
 
@@ -119,7 +121,7 @@ class ConsumoTests(TestCase):
 
         self.assertEqual(
             set(consumo_admin.get_readonly_fields(request)),
-            {"trabajador", "fecha", "numero", "operador", "registrado_en", "metodo"},
+            {"trabajador", "fecha", "numero", "operador", "local", "registrado_en", "metodo"},
         )
         self.assertFalse(consumo_admin.has_add_permission(request))
         self.assertFalse(consumo_admin.has_delete_permission(request))
@@ -340,3 +342,76 @@ class VersionEstaticosTests(TestCase):
         self.assertRegex(version, r"^[0-9a-f]{10}$")
         self.assertContains(response, f"css/app.css?v={version}")
         self.assertContains(response, f"js/app.js?v={version}")
+
+
+class ConsumoPorLocalTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.norte = Local.objects.create(nombre="Casino Norte", direccion="Calle 1")
+        self.sur = Local.objects.create(nombre="Casino Sur", direccion="Calle 2")
+        self.mozo_norte = User.objects.create_user(username="mozo-norte", password="x")
+        Operador.objects.create(usuario=self.mozo_norte, local=self.norte)
+        self.mozo_sur = User.objects.create_user(username="mozo-sur", password="x")
+        Operador.objects.create(usuario=self.mozo_sur, local=self.sur)
+        self.admin = User.objects.create_user(username="admin-local", password="x", is_staff=True)
+        empresa = Empresa.objects.create(
+            nombre="Empresa Local", rut="76111111-6", direccion="Dir",
+            encargado_personal="RRHH", almuerzos_diarios=3,
+        )
+        self.trabajador = Trabajador.objects.create(
+            nombre="Juan", apellido="Perez", rut="11111111-1", empresa=empresa
+        )
+
+    def escanear(self, usuario):
+        self.client.force_login(usuario)
+        return self.client.post(
+            reverse("consumos:escaner"),
+            {"token": str(self.trabajador.token_qr)},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        ).json()
+
+    def test_consumo_queda_en_el_local_del_operador(self):
+        self.escanear(self.mozo_norte)
+        self.escanear(self.mozo_sur)
+        self.escanear(self.admin)
+
+        locales = list(Consumo.objects.order_by("numero").values_list("local__nombre", flat=True))
+        self.assertEqual(locales, ["Casino Norte", "Casino Sur", None])
+
+    def test_historial_y_dashboard_por_local(self):
+        self.escanear(self.mozo_norte)
+        self.escanear(self.mozo_sur)
+        self.escanear(self.mozo_sur)
+        self.client.force_login(self.admin)
+
+        response = self.client.get(reverse("consumos:historial"), {"local": self.sur.pk})
+        self.assertEqual(response.context["consumos"].paginator.count, 2)
+
+        dashboard = self.client.get(reverse("consumos:dashboard"))
+        totales = {fila["local__nombre"]: fila["total"] for fila in dashboard.context["locales"]}
+        self.assertEqual(totales, {"Casino Norte": 1, "Casino Sur": 2})
+
+    def test_local_con_historial_no_se_elimina(self):
+        self.escanear(self.mozo_norte)
+        self.client.force_login(self.admin)
+
+        response = self.client.post(reverse("locales:eliminar"), {"locales": [self.norte.pk]}, follow=True)
+
+        self.assertTrue(Local.objects.filter(pk=self.norte.pk).exists())
+        self.assertContains(response, "No se puede eliminar un local")
+
+    def test_migracion_asigna_el_local_solo_si_hay_uno(self):
+        from django.apps import apps
+        migracion = import_module("consumos.migrations.0005_asignar_local_unico")
+        sin_local = get_user_model().objects.create_user(username="mozo-antiguo", password="x")
+        operador = Operador.objects.create(usuario=sin_local)
+
+        migracion.asignar_local_unico(apps, None)
+        operador.refresh_from_db()
+        self.assertIsNone(operador.local)  # hay dos locales: no se puede saber cuál
+
+        Operador.objects.exclude(pk=operador.pk).delete()
+        self.sur.delete()
+        migracion.asignar_local_unico(apps, None)
+        operador.refresh_from_db()
+        self.assertEqual(operador.local, self.norte)

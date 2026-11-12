@@ -6,9 +6,10 @@
         <div><div class="cq-eyebrow">Acceso al escáner</div><h1>{{ operador }}</h1><p class="cq-subtitle">Usuario <code>{{ operador.usuario.username }}</code>. Desactívalo para quitarle el acceso de inmediato o asígnale una clave nueva.</p></div>
         <div class="cq-actions"><a class="btn btn-outline-secondary" href="{% url 'operadores:lista' %}">Volver a operadores</a></div>
     </div>
+    {% if not form.fields.local.queryset.exists %}<div class="cq-banner cq-banner-warning mb-3">No hay locales activos. <a href="{% url 'locales:crear' %}">Crea un local</a> antes de asignar operadores.</div>{% endif %}
     <form method="post" class="cq-card cq-form-card">
         {% csrf_token %}{{ form.non_field_errors }}
-        {% for field in form %}<div class="cq-form-field{% if field.field.widget.input_type == 'checkbox' %} cq-switch-field{% endif %}{% if not field.field.required %} optional{% endif %} mb-3{% if field.errors %} has-error{% endif %}">{{ field.errors }}{{ field.label_tag }}{{ field }}</div>{% endfor %}
+        {% for field in form %}<div class="cq-form-field{% if field.field.widget.input_type == 'checkbox' %} cq-switch-field{% endif %}{% if not field.field.required %} optional{% endif %} mb-3{% if field.errors %} has-error{% endif %}">{{ field.errors }}{{ field.label_tag }}{{ field }}{% if field.help_text %}<div class="form-text">{{ field.help_text }}</div>{% endif %}</div>{% endfor %}
         <div class="cq-form-actions"><button class="btn btn-primary" type="submit">Guardar cambios</button><a class="btn btn-outline-secondary" href="{% url 'operadores:lista' %}">Cancelar</a></div>
     </form>
 </div></div>

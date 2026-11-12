@@ -8,6 +8,14 @@ class Operador(models.Model):
         on_delete=models.CASCADE,
         related_name="perfil_operador",
     )
+    local = models.ForeignKey(
+        "locales.Local",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="operadores",
+        help_text="Local donde el operador registra los almuerzos.",
+    )
     creado_en = models.DateTimeField(auto_now_add=True)
     activo = models.BooleanField(default=True)
 

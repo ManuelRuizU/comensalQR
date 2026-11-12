@@ -11,6 +11,7 @@ from django.utils.dateparse import parse_date
 
 from empresas.models import Empresa
 from empresas.validators import normalizar_rut
+from locales.models import Local
 from trabajadores.models import Trabajador
 
 from .models import Consumo
@@ -31,10 +32,16 @@ def dashboard(request):
         .annotate(total=Count("id"))
         .order_by("trabajador__empresa__nombre")
     )
+    locales = (
+        consumos_hoy.values("local__nombre")
+        .annotate(total=Count("id"))
+        .order_by("local__nombre")
+    )
     contexto = {
         "fecha": hoy,
         "total_hoy": consumos_hoy.count(),
         "empresas": empresas,
+        "locales": locales,
         "ultimos_consumos": consumos_hoy.select_related(
             "trabajador", "trabajador__empresa"
         )[:10],
@@ -46,7 +53,7 @@ def dashboard(request):
 def historial(request):
     es_admin = request.user.is_staff
     consumos = Consumo.objects.select_related(
-        "trabajador", "trabajador__empresa", "operador"
+        "trabajador", "trabajador__empresa", "operador", "local"
     )
 
     if es_admin:
@@ -55,6 +62,7 @@ def historial(request):
         # El operador solo consulta la jornada en curso.
         fecha = timezone.localdate()
     empresa_id = request.GET.get("empresa", "")
+    local_id = request.GET.get("local", "")
     trabajador_id = request.GET.get("trabajador", "") if es_admin else ""
     rut_ingresado = request.GET.get("rut", "").strip()
     rut = ""
@@ -69,6 +77,8 @@ def historial(request):
         consumos = consumos.filter(fecha=fecha)
     if empresa_id.isdigit():
         consumos = consumos.filter(trabajador__empresa_id=int(empresa_id))
+    if local_id.isdigit():
+        consumos = consumos.filter(local_id=int(local_id))
     if trabajador_id.isdigit():
         consumos = consumos.filter(trabajador_id=int(trabajador_id))
     if rut:
@@ -83,6 +93,8 @@ def historial(request):
         "consumos": pagina,
         "es_admin": es_admin,
         "empresas": Empresa.objects.all(),
+        "locales": Local.objects.all(),
+        "local_seleccionado": local_id,
         # Solo se listan los trabajadores de la empresa elegida: cargar la nómina
         # completa de todas las empresas haría la página lenta.
         "trabajadores": (

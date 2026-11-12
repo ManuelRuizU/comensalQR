@@ -5,6 +5,8 @@ from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
+from locales.models import Local
+
 from .access_control import (
     MAX_INTENTOS_POR_CUENTA,
     MAX_INTENTOS_POR_CUENTA_IP,
@@ -164,6 +166,7 @@ class CreacionOperadorTests(TestCase):
         self.admin = get_user_model().objects.create_superuser(
             username="admin", email="admin@example.com", password="admin-password"
         )
+        self.local = Local.objects.create(nombre="Casino Norte", direccion="Calle 1")
         self.client.force_login(self.admin)
 
     def test_reenvio_del_post_no_crea_otro_operador(self):
@@ -174,6 +177,7 @@ class CreacionOperadorTests(TestCase):
             "solicitud_id": solicitud_id,
             "nombre": "Ana",
             "apellido": "Rojas",
+            "local": self.local.pk,
             "clave": "12345678",
         }
 
@@ -184,9 +188,20 @@ class CreacionOperadorTests(TestCase):
         self.assertIn("no-store", primera_respuesta["Cache-Control"])
         self.assertRedirects(segunda_respuesta, reverse("operadores:lista"))
         self.assertEqual(Operador.objects.count(), 1)
+        self.assertEqual(Operador.objects.get().local, self.local)
+
+    def test_operador_requiere_local(self):
+        datos = {"solicitud_id": "solicitud", "nombre": "Ana", "apellido": "Rojas", "clave": "12345678"}
+        form = OperadorForm(data=datos)
+        self.assertFalse(form.is_valid())
+        self.assertIn("local", form.errors)
+
+        self.local.activo = False
+        self.local.save(update_fields=["activo"])
+        self.assertFalse(OperadorForm(data={**datos, "local": self.local.pk}).is_valid())
 
     def test_clave_de_operador_debe_tener_ocho_digitos(self):
-        datos = {"solicitud_id": "solicitud", "nombre": "Ana", "apellido": "Rojas"}
+        datos = {"solicitud_id": "solicitud", "nombre": "Ana", "apellido": "Rojas", "local": self.local.pk}
 
         self.assertFalse(OperadorForm(data={**datos, "clave": "1234"}).is_valid())
         self.assertFalse(OperadorForm(data={**datos, "clave": "123456"}).is_valid())
@@ -226,7 +241,8 @@ class EditarOperadorTests(TestCase):
         User = get_user_model()
         self.admin = User.objects.create_user(username="admin", password="x", is_staff=True)
         self.usuario = User.objects.create_user(username="mozo.uno", password="123456")
-        self.operador = Operador.objects.create(usuario=self.usuario)
+        self.local = Local.objects.create(nombre="Casino Norte", direccion="Calle 1")
+        self.operador = Operador.objects.create(usuario=self.usuario, local=self.local)
 
     def test_desactivar_operador_corta_su_acceso(self):
         mozo = Client()
@@ -234,7 +250,9 @@ class EditarOperadorTests(TestCase):
         self.assertEqual(mozo.get(reverse("consumos:escaner")).status_code, 200)
 
         self.client.force_login(self.admin)
-        response = self.client.post(reverse("operadores:editar", args=[self.operador.pk]), {})
+        response = self.client.post(
+            reverse("operadores:editar", args=[self.operador.pk]), {"local": self.local.pk}
+        )
 
         self.assertRedirects(response, reverse("operadores:lista"))
         self.operador.refresh_from_db()
@@ -245,7 +263,7 @@ class EditarOperadorTests(TestCase):
         self.client.force_login(self.admin)
         response = self.client.post(
             reverse("operadores:editar", args=[self.operador.pk]),
-            {"activo": "on", "nueva_clave": "87654321"},
+            {"activo": "on", "local": self.local.pk, "nueva_clave": "87654321"},
         )
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "87654321")
@@ -256,12 +274,26 @@ class EditarOperadorTests(TestCase):
         self.client.force_login(self.admin)
         response = self.client.post(
             reverse("operadores:editar", args=[self.operador.pk]),
-            {"activo": "on", "nueva_clave": "654321"},
+            {"activo": "on", "local": self.local.pk, "nueva_clave": "654321"},
         )
         self.assertEqual(response.status_code, 200)
         self.assertIn("nueva_clave", response.context["form"].errors)
         self.usuario.refresh_from_db()
         self.assertTrue(self.usuario.check_password("123456"))
+
+    def test_cambiar_local_y_conservar_uno_desactivado(self):
+        otro = Local.objects.create(nombre="Casino Sur", direccion="Calle 2")
+        self.local.activo = False
+        self.local.save(update_fields=["activo"])
+        self.client.force_login(self.admin)
+        url = reverse("operadores:editar", args=[self.operador.pk])
+
+        # Puede seguir en su local aunque se haya desactivado...
+        self.assertRedirects(self.client.post(url, {"activo": "on", "local": self.local.pk}), reverse("operadores:lista"))
+        # ...y cambiarse a otro activo.
+        self.assertRedirects(self.client.post(url, {"activo": "on", "local": otro.pk}), reverse("operadores:lista"))
+        self.operador.refresh_from_db()
+        self.assertEqual(self.operador.local, otro)
 
     def test_operador_no_puede_editar_operadores(self):
         self.client.force_login(self.usuario)

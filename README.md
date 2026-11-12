@@ -93,7 +93,14 @@ operador busca su RUT y elige la empresa. El consumo respeta el mismo cupo, qued
 marcado como «manual» en el historial y registra qué operador lo hizo.
 
 El operador solo consulta el historial del día en curso. El administrador
-puede desactivar operadores o asignarles una clave nueva desde **Operadores**.
+puede desactivar operadores, cambiarles el local o asignarles una clave nueva
+desde **Operadores**.
+
+Cada operador está asignado a un local, y cada consumo guarda el local del
+operador que lo registró. El historial se puede filtrar por local y el
+dashboard muestra el total por local cuando hay más de uno. Los consumos que
+registra un administrador quedan sin local. Un local con operadores o consumos
+no se puede eliminar, solo desactivar.
 
 El operador no debe tener acceso a información administrativa innecesaria.
 

@@ -174,7 +174,7 @@ class CreacionOperadorTests(TestCase):
             "solicitud_id": solicitud_id,
             "nombre": "Ana",
             "apellido": "Rojas",
-            "clave": "123456",
+            "clave": "12345678",
         }
 
         primera_respuesta = self.client.post(url, datos)
@@ -185,12 +185,13 @@ class CreacionOperadorTests(TestCase):
         self.assertRedirects(segunda_respuesta, reverse("operadores:lista"))
         self.assertEqual(Operador.objects.count(), 1)
 
-    def test_clave_de_operador_debe_tener_seis_digitos(self):
+    def test_clave_de_operador_debe_tener_ocho_digitos(self):
         datos = {"solicitud_id": "solicitud", "nombre": "Ana", "apellido": "Rojas"}
 
         self.assertFalse(OperadorForm(data={**datos, "clave": "1234"}).is_valid())
-        self.assertFalse(OperadorForm(data={**datos, "clave": "１２３４５６"}).is_valid())
-        self.assertTrue(OperadorForm(data={**datos, "clave": "123456"}).is_valid())
+        self.assertFalse(OperadorForm(data={**datos, "clave": "123456"}).is_valid())
+        self.assertFalse(OperadorForm(data={**datos, "clave": "１２３４５６７８"}).is_valid())
+        self.assertTrue(OperadorForm(data={**datos, "clave": "12345678"}).is_valid())
 
 
 class AdminLoginRoutingTests(TestCase):
@@ -244,18 +245,18 @@ class EditarOperadorTests(TestCase):
         self.client.force_login(self.admin)
         response = self.client.post(
             reverse("operadores:editar", args=[self.operador.pk]),
-            {"activo": "on", "nueva_clave": "654321"},
+            {"activo": "on", "nueva_clave": "87654321"},
         )
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "654321")
+        self.assertContains(response, "87654321")
         self.usuario.refresh_from_db()
-        self.assertTrue(self.usuario.check_password("654321"))
+        self.assertTrue(self.usuario.check_password("87654321"))
 
-    def test_clave_de_4_digitos_es_rechazada(self):
+    def test_clave_de_6_digitos_es_rechazada(self):
         self.client.force_login(self.admin)
         response = self.client.post(
             reverse("operadores:editar", args=[self.operador.pk]),
-            {"activo": "on", "nueva_clave": "1234"},
+            {"activo": "on", "nueva_clave": "654321"},
         )
         self.assertEqual(response.status_code, 200)
         self.assertIn("nueva_clave", response.context["form"].errors)

@@ -291,7 +291,7 @@ Python + Django
 
 ### Protección del inicio de sesión
 
-Las claves de operador son de exactamente 6 dígitos. Los intentos se limitan por cuenta y por IP; por defecto se usa `REMOTE_ADDR`, adecuado para una conexión directa. Si el servicio se publica detrás de un proxy confiable, configura `DJANGO_TRUSTED_PROXY_IP_HEADER` con la clave WSGI del encabezado que el proxy sobrescribe (por ejemplo, `HTTP_X_REAL_IP`) y `DJANGO_TRUSTED_PROXY_IPS` con las IP de origen de los proxies. Solo se usará el encabezado si la conexión viene de una de esas IP. El proxy debe eliminar cualquier valor entrante de ese encabezado y escribir una única IP validada; no confíes en encabezados enviados directamente por el cliente. Si la infraestructura aún no está definida, deja ambas variables vacías.
+Las claves de operador son de exactamente 8 dígitos (las claves de 6 dígitos creadas antes siguen funcionando hasta que se cambien). Los intentos se limitan por cuenta y por IP; por defecto se usa `REMOTE_ADDR`, adecuado para una conexión directa. Si el servicio se publica detrás de un proxy confiable, configura `DJANGO_TRUSTED_PROXY_IP_HEADER` con la clave WSGI del encabezado que el proxy sobrescribe (por ejemplo, `HTTP_X_REAL_IP`) y `DJANGO_TRUSTED_PROXY_IPS` con las IP de origen de los proxies. Solo se usará el encabezado si la conexión viene de una de esas IP. El proxy debe eliminar cualquier valor entrante de ese encabezado y escribir una única IP validada; no confíes en encabezados enviados directamente por el cliente. Si la infraestructura aún no está definida, deja ambas variables vacías.
 
 Base de datos
 

@@ -11,7 +11,9 @@ from .models import IntentoAcceso
 
 
 MAX_INTENTOS_POR_CUENTA_IP = 5
-MAX_INTENTOS_POR_CUENTA = 10
+# Alto para que un tercero no pueda bloquear fácilmente a un operador; la clave
+# de 8 dígitos (10^8 combinaciones) sigue siendo inviable de adivinar a este ritmo.
+MAX_INTENTOS_POR_CUENTA = 30
 MAX_INTENTOS_POR_IP = 20
 VENTANA = timedelta(minutes=15)
 DURACION_BLOQUEO = timedelta(minutes=15)

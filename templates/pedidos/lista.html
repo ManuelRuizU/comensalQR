@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Pedidos del día | ComensalQR{% endblock %}
+{% block content %}
+<div class="cq-heading">
+    <div>
+        <div class="cq-eyebrow">Servicio</div><h1>Pedidos del día</h1>
+        <p class="cq-subtitle">{{ local|default:"Sin local" }} · {{ fecha|date:"l d/m/Y" }} · {{ vigentes }} pedido(s){% if anulados %} · {{ anulados }} anulado(s){% endif %}</p>
+    </div>
+    <div class="cq-actions"><a class="btn btn-outline-secondary" href="{% url 'menus:menu_dia' %}?{% if local %}local={{ local.pk }}&amp;{% endif %}fecha={{ fecha|date:'Y-m-d' }}">Ver menú</a></div>
+</div>
+
+<form method="get" class="cq-card mb-4 d-flex flex-wrap gap-2 align-items-end">
+    {% if locales|length > 1 %}
+        <div><label class="form-label" for="sel-local">Local</label><select class="form-select" id="sel-local" name="local">{% for l in locales %}<option value="{{ l.pk }}" {% if l == local %}selected{% endif %}>{{ l.nombre }}</option>{% endfor %}</select></div>
+    {% elif local %}<input type="hidden" name="local" value="{{ local.pk }}">{% endif %}
+    <div><label class="form-label" for="sel-fecha">Fecha</label><input class="form-control" id="sel-fecha" type="date" name="fecha" value="{{ fecha|date:'Y-m-d' }}"></div>
+    <button class="btn btn-outline-primary" type="submit">Ver</button>
+</form>
+
+<div class="cq-card">
+    <div class="cq-table-wrap"><table class="table cq-table">
+        <thead><tr><th>Folio</th><th>Hora</th><th>Comensal</th><th>Platos</th><th>Estado</th><th>Garzón</th><th></th></tr></thead>
+        <tbody>
+        {% for fila in filas %}{% with pedido=fila.pedido consumo=fila.pedido.consumo %}
+        <tr{% if pedido.estado == "anulado" %} class="cq-anulado"{% endif %}>
+            <td class="fw-semibold">{{ pedido.folio_texto }}<div class="small text-secondary">{{ pedido.mesa_nombre }}</div></td>
+            <td>{{ pedido.creado|date:"H:i" }}</td>
+            <td>{{ consumo.trabajador }}<div class="small text-secondary">{{ consumo.trabajador.empresa }}{% if consumo.metodo == "rut" %} · manual{% endif %}</div></td>
+            <td>
+                {% for linea in fila.items %}
+                    <div><span class="text-secondary small">{{ linea.item.tiempo_nombre }}:</span> {{ linea.item }}</div>
+                    {% if pedido.estado == "pendiente" and linea.opciones|length > 1 %}
+                    <details class="cq-item-acciones mb-1"><summary class="btn btn-sm btn-link p-0">Cambiar</summary>
+                        <form method="post" action="{% url 'pedidos:cambiar_item' linea.item.pk %}" class="cq-item-panel cq-item-form">{% csrf_token %}
+                            <input type="hidden" name="volver" value="{{ request.get_full_path }}">
+                            <label>Nuevo {{ linea.item.tiempo_nombre|lower }}<select class="form-select form-select-sm" name="opcion">{% for valor, texto in linea.opciones %}<option value="{{ valor }}" {% if valor == linea.actual %}selected{% endif %}>{{ texto }}</option>{% endfor %}</select></label>
+                            <label>Motivo (opcional) <input class="form-control form-control-sm" name="motivo" maxlength="200"></label>
+                            <button class="btn btn-sm btn-primary" type="submit">Cambiar plato</button>
+                        </form>
+                    </details>
+                    {% endif %}
+                {% endfor %}
+            </td>
+            <td>
+                {% if pedido.estado == "anulado" %}<span class="badge text-bg-danger" title="{{ consumo.motivo_anulacion }}">Anulado</span><div class="small text-secondary">{{ consumo.motivo_anulacion }}</div>
+                {% elif pedido.estado == "pendiente" %}<span class="badge text-bg-warning">Pendiente</span>
+                {% elif pedido.estado == "listo" %}<span class="badge text-bg-info">Listo</span>
+                {% else %}<span class="badge text-bg-success">Entregado</span>{% endif %}
+            </td>
+            <td>{{ consumo.operador.get_full_name|default:consumo.operador.username }}</td>
+            <td class="text-end">
+                {% if pedido.estado != "anulado" %}
+                <details class="cq-item-acciones"><summary class="btn btn-sm btn-outline-danger">Anular</summary>
+                    <form method="post" action="{% url 'consumos:anular' consumo.pk %}" class="cq-item-panel cq-item-form">{% csrf_token %}
+                        <input type="hidden" name="volver" value="{{ request.get_full_path }}">
+                        <label>Motivo <input class="form-control form-control-sm" name="motivo" maxlength="200" required placeholder="Ej.: el comensal no almorzó"></label>
+                        <p class="small text-secondary mb-0">Devuelve las porciones. El folio {{ pedido.folio_texto }} no se reutiliza y el consumo no se cobra.</p>
+                        <button class="btn btn-sm btn-danger" type="submit">Anular pedido</button>
+                    </form>
+                </details>
+                {% endif %}
+            </td>
+        </tr>
+        {% endwith %}{% empty %}<tr><td colspan="7" class="text-secondary">No hay pedidos este día.</td></tr>{% endfor %}
+        </tbody>
+    </table></div>
+</div>
+{% endblock %}

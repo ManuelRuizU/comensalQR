@@ -1,14 +1,17 @@
 import json
 import uuid
 
+from django.contrib import messages
 from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db.models import Count
 from django.http import JsonResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.views.decorators.http import require_POST
 
 from empresas.models import Empresa
@@ -27,7 +30,9 @@ from trabajadores.models import Trabajador
 
 from .models import Consumo, consumos_vigentes
 from .services import (
+    AnulacionInvalida,
     PedidoRechazado,
+    anular_consumo,
     TrabajadorNoDisponible,
     estado_cupo,
     registrar_consumo_diario,
@@ -70,7 +75,7 @@ def dashboard(request):
 def historial(request):
     es_admin = request.user.is_staff
     consumos = Consumo.objects.select_related(
-        "trabajador", "trabajador__empresa", "operador", "local", "anulado_por"
+        "trabajador", "trabajador__empresa", "operador", "local", "anulado_por", "pedido"
     )
 
     if es_admin:
@@ -378,3 +383,19 @@ def buscar_por_rut(request):
     if not candidatos:
         return JsonResponse({"ok": False, "message": "No hay trabajadores activos con ese RUT."}, status=404)
     return JsonResponse({"ok": True, "rut": rut, "results": candidatos})
+
+
+@user_passes_test(lambda user: user.is_authenticated and user.is_staff, login_url="login")
+@require_POST
+def anular(request, consumo_id):
+    """Anula un consumo (solo administrador, con motivo). Si tiene pedido, devuelve sus porciones."""
+    try:
+        consumo = anular_consumo(consumo_id, request.user, request.POST.get("motivo", ""))
+    except AnulacionInvalida as error:
+        messages.error(request, str(error))
+    else:
+        messages.success(request, f"Consumo de {consumo.trabajador} anulado. No cuenta para el cupo ni se cobra.")
+    destino = request.POST.get("volver", "")
+    if not (destino and url_has_allowed_host_and_scheme(destino, allowed_hosts={request.get_host()})):
+        destino = reverse("consumos:historial")
+    return redirect(destino)

@@ -415,3 +415,64 @@ class EscanerConMenuTests(TestCase):
         self.assertEqual(self.client.get(url, HTTP_IF_NONE_MATCH=primera["ETag"]).status_code, 304)
         menu.reservar(self.e.garzon_b, nuevo_token(), self.e.pollo.pk)
         self.assertEqual(self.client.get(url, HTTP_IF_NONE_MATCH=primera["ETag"]).status_code, 200)
+
+
+class PedidosDelDiaTests(TestCase):
+    def setUp(self):
+        self.e = crear_escenario()
+        self.resultado = registrar_pedido(
+            self.e.trabajador.pk, self.e.garzon_a, nuevo_token(), [chuleta_con(self.e, self.e.pure)]
+        )
+        self.client.force_login(self.e.admin)
+
+    def test_lista_muestra_folio_platos_y_opciones_de_cambio(self):
+        response = self.client.get(reverse("pedidos:lista"))
+
+        self.assertContains(response, "0001")
+        self.assertContains(response, "Chuleta de cerdo + Puré")
+        self.assertContains(response, "Pollo asado")  # opción de cambio del mismo tiempo
+
+    def test_cambiar_plato_desde_la_pantalla(self):
+        item = self.resultado.pedido.items.get()
+        self.client.post(reverse("pedidos:cambiar_item", args=[item.pk]), {"opcion": f"{self.e.pollo.pk}:"})
+
+        item.refresh_from_db()
+        self.assertEqual(item.plato_nombre, "Pollo asado")
+
+    def test_anular_exige_motivo_y_devuelve_porciones(self):
+        url = reverse("consumos:anular", args=[self.resultado.consumo.pk])
+        self.client.post(url, {"motivo": ""})
+        self.assertFalse(Consumo.objects.get().anulado)
+
+        self.client.post(url, {"motivo": "No almorzó"})
+
+        self.assertTrue(Consumo.objects.get().anulado)
+        self.assertEqual(Pedido.objects.get().estado, Pedido.ANULADO)
+        self.e.pure.refresh_from_db()
+        self.assertEqual(self.e.pure.vendidas, 0)
+
+    def test_garzon_no_anula_ni_cambia(self):
+        self.client.force_login(self.e.garzon_a)
+        item = self.resultado.pedido.items.get()
+
+        self.client.post(reverse("consumos:anular", args=[self.resultado.consumo.pk]), {"motivo": "x"})
+        self.client.post(reverse("pedidos:cambiar_item", args=[item.pk]), {"opcion": f"{self.e.pollo.pk}:"})
+
+        self.assertFalse(Consumo.objects.get().anulado)
+        item.refresh_from_db()
+        self.assertEqual(item.plato_nombre, "Chuleta de cerdo")
+        self.assertEqual(self.client.get(reverse("pedidos:lista")).status_code, 302)
+
+    def test_anular_consumo_sin_pedido_desde_el_historial(self):
+        self.e.menu.publicado = False
+        self.e.menu.save()
+        from consumos.services import registrar_consumo_diario
+
+        consumo = registrar_consumo_diario(self.e.otro.pk, self.e.garzon_a).consumo
+        historial = self.client.get(reverse("consumos:historial"))
+        self.assertContains(historial, reverse("consumos:anular", args=[consumo.pk]))
+
+        self.client.post(reverse("consumos:anular", args=[consumo.pk]), {"motivo": "Prueba"})
+
+        consumo.refresh_from_db()
+        self.assertTrue(consumo.anulado)

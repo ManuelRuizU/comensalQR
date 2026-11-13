@@ -1,9 +1,11 @@
+import json
 import threading
 import unittest
 from datetime import timedelta
 
 from django.db import connection, connections
 from django.test import TestCase, TransactionTestCase
+from django.urls import reverse
 from django.utils import timezone
 
 from consumos.models import Consumo
@@ -296,3 +298,120 @@ class ConcurrenciaPostgresTests(TransactionTestCase):
         self.assertFalse([r for r in resultados if isinstance(r, Exception)], resultados)
         self.assertEqual(Pedido.objects.count(), 1)
         self.assertEqual(len({r.pedido.pk for r in resultados}), 1)
+
+
+class EscanerConMenuTests(TestCase):
+    def setUp(self):
+        self.e = crear_escenario()
+        self.client.force_login(self.e.garzon_a)
+
+    def escanear(self, **campos):
+        return self.client.post(reverse("consumos:escaner"), campos, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+
+    def qr(self):
+        return {"token": str(self.e.trabajador.token_qr)}
+
+    def confirmar(self, token, seleccion, **campos):
+        return self.client.post(
+            reverse("consumos:confirmar"),
+            {**(campos or self.qr()), "selection_token": token, "seleccion": json.dumps(seleccion)},
+        )
+
+    def test_escanear_abre_la_hoja_sin_registrar_nada(self):
+        datos = self.escanear(**self.qr()).json()
+
+        self.assertEqual(datos["status"], "seleccion")
+        self.assertEqual((datos["worker"], datos["used"], datos["quota"]), ("Javier Cid", 0, 1))
+        self.assertEqual([t["nombre"] for t in datos["menu"]["tiempos"]], ["Fondo", "Postre"])
+        self.assertFalse(Consumo.objects.exists())
+
+    def test_reservar_confirmar_y_resultado_con_folio(self):
+        token = self.escanear(**self.qr()).json()["selection_token"]
+        reserva = self.client.post(reverse("consumos:reservar"), {"selection_token": token, "plato": self.e.chuleta.pk, "acompanamiento": self.e.arroz.pk})
+        self.assertEqual(reserva.status_code, 200)
+
+        datos = self.confirmar(token, [chuleta_con(self.e, self.e.arroz)]).json()
+
+        self.assertEqual((datos["status"], datos["folio"], datos["message"]), ("registered", "0001", "Pedido 0001 · Sin mesa"))
+        self.assertEqual(datos["items"], ["Chuleta de cerdo + Arroz"])
+        self.assertEqual(Pedido.objects.get().consumo.metodo, Consumo.METODO_QR)
+        # Reintento de red con la misma selección: mismo pedido, sin crear otro.
+        self.assertEqual(self.confirmar(token, [chuleta_con(self.e, self.e.arroz)]).json()["folio"], "0001")
+        self.assertEqual(Pedido.objects.count(), 1)
+
+    def test_reserva_ajena_responde_reservada_por_otro(self):
+        self.e.pollo.porciones = 1
+        self.e.pollo.save()
+        menu.reservar(self.e.garzon_b, nuevo_token(), self.e.pollo.pk)
+
+        respuesta = self.client.post(reverse("consumos:reservar"), {"selection_token": str(nuevo_token()), "plato": self.e.pollo.pk})
+
+        self.assertEqual(respuesta.status_code, 409)
+        self.assertEqual(respuesta.json()["code"], "reservada_por_otro")
+
+    def test_porcion_agotada_al_confirmar_mantiene_la_hoja(self):
+        self.e.pollo.porciones = 0
+        self.e.pollo.save()
+
+        respuesta = self.confirmar(str(nuevo_token()), [{"plato": self.e.pollo.pk}])
+
+        self.assertEqual(respuesta.status_code, 409)
+        self.assertEqual((respuesta.json()["code"], respuesta.json()["item"]), ("porcion_agotada", "Pollo asado"))
+        self.assertFalse(Consumo.objects.exists())
+
+    def test_registro_manual_por_rut_usa_la_misma_hoja(self):
+        manual = {"trabajador_id": str(self.e.trabajador.pk)}
+        datos = self.escanear(**manual).json()
+        self.assertEqual((datos["status"], datos["manual"]), ("seleccion", True))
+
+        resultado = self.confirmar(datos["selection_token"], [{"plato": self.e.pollo.pk}], **manual).json()
+
+        self.assertEqual(resultado["status"], "registered")
+        self.assertEqual(Pedido.objects.get().consumo.metodo, Consumo.METODO_RUT)
+
+    def test_cupo_agotado_al_escanear(self):
+        registrar_pedido(self.e.trabajador.pk, self.e.garzon_a, nuevo_token(), [{"plato": self.e.pollo.pk}])
+
+        datos = self.escanear(**self.qr()).json()
+
+        self.assertEqual(datos["status"], "duplicate")
+        self.assertEqual(datos["message"], "Cupo diario agotado (1 de 1).")
+
+    def test_igual_al_anterior(self):
+        registrar_pedido(self.e.otro.pk, self.e.garzon_a, nuevo_token(), [chuleta_con(self.e, self.e.pure), {"plato": self.e.naranja.pk}])
+
+        datos = self.escanear(**self.qr()).json()
+
+        self.assertEqual(
+            datos["previous"],
+            [{"plato": self.e.chuleta.pk, "acompanamiento": self.e.pure.pk}, {"plato": self.e.naranja.pk, "acompanamiento": None}],
+        )
+
+    def test_sin_menu_publicado_el_escaner_funciona_como_v01(self):
+        self.e.menu.publicado = False
+        self.e.menu.save()
+
+        datos = self.escanear(**self.qr()).json()
+
+        self.assertEqual((datos["status"], datos["message"]), ("registered", "Almuerzo 1 de 1 registrado."))
+        consumo = Consumo.objects.get()
+        self.assertFalse(Pedido.objects.exists())
+        self.assertEqual(consumo.local, self.e.local)
+        self.assertEqual(self.escanear(**self.qr()).json()["status"], "duplicate")
+
+    def test_usuario_sin_local_escanea_como_v01(self):
+        from django.contrib.auth import get_user_model
+
+        sin_local = get_user_model().objects.create_user(username="root", password="x", is_staff=True)
+        self.client.force_login(sin_local)
+
+        self.assertEqual(self.escanear(**self.qr()).json()["status"], "registered")
+        self.assertFalse(Pedido.objects.exists())
+
+    def test_disponibilidad_de_hoy_con_etag(self):
+        url = reverse("menus:disponibilidad_hoy")
+        primera = self.client.get(url)
+        self.assertEqual(primera.json()["menu_id"], self.e.menu.pk)
+        self.assertEqual(self.client.get(url, HTTP_IF_NONE_MATCH=primera["ETag"]).status_code, 304)
+        menu.reservar(self.e.garzon_b, nuevo_token(), self.e.pollo.pk)
+        self.assertEqual(self.client.get(url, HTTP_IF_NONE_MATCH=primera["ETag"]).status_code, 200)

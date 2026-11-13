@@ -63,6 +63,8 @@ INSTALLED_APPS = [
     "trabajadores",
     "consumos",
     "operadores",
+    "menus",
+    "pedidos",
 ]
 
 MIDDLEWARE = [

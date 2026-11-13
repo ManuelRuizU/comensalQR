@@ -15,7 +15,7 @@ from locales.models import Local
 from operadores.models import local_de_usuario
 from trabajadores.models import Trabajador
 
-from .models import Consumo
+from .models import Consumo, consumos_vigentes
 from .services import TrabajadorNoDisponible, registrar_consumo_diario
 
 
@@ -27,7 +27,7 @@ def operador_o_administrador(user):
 @user_passes_test(lambda user: user.is_authenticated and user.is_staff, login_url="login")
 def dashboard(request):
     hoy = timezone.localdate()
-    consumos_hoy = Consumo.objects.filter(fecha=hoy)
+    consumos_hoy = consumos_vigentes().filter(fecha=hoy)
     empresas = (
         consumos_hoy.values("trabajador__empresa__nombre")
         .annotate(total=Count("id"))
@@ -54,7 +54,7 @@ def dashboard(request):
 def historial(request):
     es_admin = request.user.is_staff
     consumos = Consumo.objects.select_related(
-        "trabajador", "trabajador__empresa", "operador", "local"
+        "trabajador", "trabajador__empresa", "operador", "local", "anulado_por"
     )
 
     if es_admin:
@@ -88,10 +88,13 @@ def historial(request):
         consumos = consumos.none()
 
     pagina = Paginator(consumos, 50).get_page(request.GET.get("pagina"))
+    anulados = consumos.filter(anulado=True).count()
     filtros = request.GET.copy()
     filtros.pop("pagina", None)
     contexto = {
         "consumos": pagina,
+        "total_vigentes": pagina.paginator.count - anulados,
+        "total_anulados": anulados,
         "es_admin": es_admin,
         "empresas": Empresa.objects.all(),
         "locales": Local.objects.all(),
@@ -137,7 +140,7 @@ def escaner(request):
             request,
             "consumos/escaner.html",
             {
-                "total_hoy": Consumo.objects.filter(fecha=hoy).count(),
+                "total_hoy": consumos_vigentes().filter(fecha=hoy).count(),
                 "ultimos": _ultimos_del_operador(request.user, hoy),
                 "local": local_de_usuario(request.user),
             },
@@ -172,7 +175,7 @@ def escaner(request):
         except TrabajadorNoDisponible:
             error = "Trabajador inactivo o desvinculado. No puede registrar almuerzos."
 
-    total_hoy = Consumo.objects.filter(fecha=hoy).count()
+    total_hoy = consumos_vigentes().filter(fecha=hoy).count()
     if error:
         return JsonResponse({"ok": False, "status": "error", "message": error, "today_total": total_hoy}, status=400)
 
@@ -215,7 +218,7 @@ def buscar_por_rut(request):
         .select_related("empresa")
         .order_by("empresa__nombre")
     ):
-        usados = Consumo.objects.filter(trabajador=trabajador, fecha=hoy).count()
+        usados = consumos_vigentes().filter(trabajador=trabajador, fecha=hoy).count()
         candidatos.append({
             "id": trabajador.pk,
             "worker": str(trabajador),

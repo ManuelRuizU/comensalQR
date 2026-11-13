@@ -853,3 +853,7 @@ body {
 .cq-sheet-time { font-weight: 800; }
 .cq-sheet-empty { color: var(--cq-muted); padding: 0.5rem 0; }
 
+
+/* Consumo anulado en el historial: visible pero atenuado. */
+.cq-anulado td { color: var(--bs-secondary-color); }
+.cq-anulado td:nth-child(3) { text-decoration: line-through; }

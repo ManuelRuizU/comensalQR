@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, transaction
 from django.db.models import Max
 from django.utils import timezone
@@ -52,14 +53,16 @@ def registrar_consumo_diario(trabajador_id, operador, fecha=None, metodo=Consumo
             raise TrabajadorNoDisponible
 
         cupo = trabajador.cupo_diario
-        consumos_dia = Consumo.objects.filter(trabajador=trabajador, fecha=fecha)
+        # Los anulados no cuentan para el cupo, pero su número no se reutiliza.
+        todos_dia = Consumo.objects.filter(trabajador=trabajador, fecha=fecha)
+        consumos_dia = todos_dia.filter(anulado=False)
         usados = consumos_dia.count()
         if usados >= cupo:
             return ResultadoConsumo(consumos_dia.order_by("-numero").first(), False, usados, cupo)
 
         # El número siguiente se toma del máximo existente (no del conteo) para que un
         # hueco en la numeración no provoque una colisión y un falso «cupo agotado».
-        ultimo_numero = consumos_dia.aggregate(maximo=Max("numero"))["maximo"] or 0
+        ultimo_numero = todos_dia.aggregate(maximo=Max("numero"))["maximo"] or 0
         # El consumo queda en el local de quien escanea (operador o administrador).
         local = local_de_usuario(operador)
         try:
@@ -79,3 +82,36 @@ def registrar_consumo_diario(trabajador_id, operador, fecha=None, metodo=Consumo
             return ResultadoConsumo(existente, False, consumos_dia.count(), cupo)
 
         return ResultadoConsumo(consumo, True, usados + 1, cupo)
+
+
+class AnulacionInvalida(Exception):
+    """La anulación no se puede realizar; el mensaje explica por qué."""
+
+
+def anular_consumo(consumo_id, usuario, motivo):
+    """Anula un consumo: deja de contar para el cupo y no se cobra.
+
+    Solo un administrador puede anular y el motivo es obligatorio. El registro se
+    conserva (nunca se borra) con quién, cuándo y por qué se anuló.
+    """
+    if not (usuario.is_authenticated and usuario.is_staff):
+        raise PermissionDenied("Solo un administrador puede anular consumos.")
+    motivo = (motivo or "").strip()
+    if not motivo:
+        raise AnulacionInvalida("El motivo de la anulación es obligatorio.")
+
+    trabajador_id = Consumo.objects.filter(pk=consumo_id).values_list("trabajador_id", flat=True).first()
+    if trabajador_id is None:
+        raise AnulacionInvalida("El consumo no existe.")
+    with transaction.atomic():
+        # Mismo orden de bloqueo que el registro (trabajador primero) para evitar deadlocks.
+        Trabajador.objects.select_for_update().filter(pk=trabajador_id).first()
+        consumo = Consumo.objects.select_for_update().get(pk=consumo_id)
+        if consumo.anulado:
+            raise AnulacionInvalida("El consumo ya estaba anulado.")
+        consumo.anulado = True
+        consumo.anulado_por = usuario
+        consumo.anulado_en = timezone.now()
+        consumo.motivo_anulacion = motivo[:200]
+        consumo.save(update_fields=["anulado", "anulado_por", "anulado_en", "motivo_anulacion"])
+    return consumo

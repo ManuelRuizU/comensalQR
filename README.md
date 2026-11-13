@@ -118,6 +118,38 @@ administradores, operadores o consumos no se puede eliminar, solo desactivar.
 
 El operador no debe tener acceso a información administrativa innecesaria.
 
+Menú del día y pedidos (v0.2, Fase 1)
+
+Especificación completa: `docs/v0.2-menu-mesas-cocina.md`.
+
+- **Menú** (administrador): por local y fecha, con tiempos (Fondo
+  obligatorio; Ensalada, Postre y Bebida opcionales, configurables en
+  **Menú → Tiempos**), platos, acompañamientos y porciones (vacío = sin
+  límite). Se puede copiar de otro día. Los garzones solo ven menús
+  publicados. Después de publicar, las porciones se cambian con «Ajustar»
+  (motivo obligatorio) o se marca un ítem Agotado.
+- **Escáner con menú publicado**: escanear (o buscar por RUT) no registra
+  nada; abre la hoja de pedido. Cada opción tocada reserva 1 porción por 90 s.
+  Al confirmar se crean juntos el consumo, el pedido y su folio diario
+  («Pedido 0042 · Sin mesa»). Si falta una porción, la hoja sigue abierta para
+  elegir otra opción.
+- **Sin menú publicado** hoy en el local (o usuario sin local), el escáner
+  funciona igual que en v0.1.
+- **Pedidos del día** (administrador): cambiar el plato de un pedido
+  Pendiente y anular con motivo. La anulación también está en el historial
+  para consumos sin pedido. Un anulado no cuenta para el cupo, no se cobra,
+  devuelve sus porciones y su folio no se reutiliza.
+- **Informe de cierre**: por ítem, porciones cargadas, ajustes, servidas,
+  anuladas y quedan.
+
+Pruebas de concurrencia: requieren PostgreSQL real (bloqueo de filas). Se
+omiten con `config.test_settings` (SQLite) y se ejecutan con:
+
+    python manage.py test pedidos --settings=config.settings
+
+El usuario de PostgreSQL necesita permiso para crear la base de pruebas
+(`ALTER ROLE <usuario> CREATEDB;`).
+
 ---
 
 🏢 Empresas

@@ -9,7 +9,7 @@
     <div class="cq-actions"><a class="btn btn-outline-secondary" href="{% url 'menus:menu_dia' %}?{% if local %}local={{ local.pk }}&amp;{% endif %}fecha={{ fecha|date:'Y-m-d' }}">Ver menú</a></div>
 </div>
 
-<form method="get" class="cq-card mb-4 d-flex flex-wrap gap-2 align-items-end">
+<form method="get" class="cq-card p-3 mb-4 d-flex flex-wrap gap-2 align-items-end">
     {% if locales|length > 1 %}
         <div><label class="form-label" for="sel-local">Local</label><select class="form-select" id="sel-local" name="local">{% for l in locales %}<option value="{{ l.pk }}" {% if l == local %}selected{% endif %}>{{ l.nombre }}</option>{% endfor %}</select></div>
     {% elif local %}<input type="hidden" name="local" value="{{ local.pk }}">{% endif %}
@@ -18,7 +18,7 @@
 </form>
 
 <div class="cq-card">
-    <div class="cq-table-wrap"><table class="table cq-table">
+    <div class="cq-table-wrap cq-con-paneles"><table class="table cq-table">
         <thead><tr><th>Folio</th><th>Hora</th><th>Comensal</th><th>Platos</th><th>Estado</th><th>Garzón</th><th></th></tr></thead>
         <tbody>
         {% for fila in filas %}{% with pedido=fila.pedido consumo=fila.pedido.consumo %}

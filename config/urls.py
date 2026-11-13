@@ -24,6 +24,7 @@ urlpatterns = [
     path("trabajadores/", include("trabajadores.urls")),
     path("operadores/", include("operadores.urls")),
     path("administradores/", include("operadores.urls_administradores")),
+    path("menu/", include("menus.urls")),
     path("sw.js", service_worker, name="service_worker"),
     path("", include("consumos.urls")),
 ]

@@ -1,0 +1,46 @@
+<tr data-item="{{ tipo }}-{{ item.id }}"{% if sub %} class="cq-menu-sub"{% endif %}>
+    <td>{% if sub %}<span class="text-secondary">↳</span> {% endif %}<span class="{% if not sub %}fw-semibold{% endif %}">{{ item.nombre }}</span>{% if item.umbral is not None %} <span class="text-secondary small">· aviso ≤ {{ item.umbral }}</span>{% endif %}</td>
+    <td class="text-end">{% if item.porciones is None %}sin límite{% else %}{{ item.porciones }}{% endif %}</td>
+    <td class="text-end" data-c="vendidas">{{ item.vendidas }}</td>
+    <td class="text-end" data-c="reservadas">{{ item.reservadas }}</td>
+    <td class="text-end fw-semibold" data-c="quedan">{% if item.quedan is None %}∞{% else %}{{ item.quedan }}{% endif %}</td>
+    <td><span data-c="estado" class="badge {% if item.estado == 'bajo' %}text-bg-warning{% elif item.estado == 'disponible' %}text-bg-success{% else %}text-bg-secondary{% endif %}">{% if item.agotado_manual %}Agotado (manual){% elif item.estado == 'bajo' %}Quedan pocas{% elif item.estado == 'disponible' %}Disponible{% elif item.estado == 'reservada_por_otro' %}Reservada{% else %}Agotado{% endif %}</span></td>
+    <td class="text-end">
+        <details class="cq-item-acciones">
+            <summary class="btn btn-sm btn-outline-secondary">Opciones</summary>
+            <div class="cq-item-panel">
+                <form method="post" action="{% url 'menus:accion' menu.pk %}" class="cq-item-form">{% csrf_token %}
+                    <input type="hidden" name="accion" value="editar"><input type="hidden" name="tipo" value="{{ tipo }}"><input type="hidden" name="item" value="{{ item.id }}">
+                    <label>Nombre <input class="form-control form-control-sm" name="nombre" value="{{ item.nombre }}" maxlength="80" required></label>
+                    {% if not menu.publicado %}<label>Porciones <input class="form-control form-control-sm" type="number" min="0" name="porciones" value="{{ item.porciones|default_if_none:'' }}" placeholder="sin límite"></label>{% endif %}
+                    <label>Avisar desde <input class="form-control form-control-sm" type="number" min="0" name="umbral_aviso" value="{{ item.umbral|default_if_none:'' }}"></label>
+                    <button class="btn btn-sm btn-primary" type="submit">Guardar</button>
+                </form>
+                {% if menu.publicado and item.porciones is not None %}
+                <form method="post" action="{% url 'menus:accion' menu.pk %}" class="cq-item-form">{% csrf_token %}
+                    <input type="hidden" name="accion" value="ajustar"><input type="hidden" name="tipo" value="{{ tipo }}"><input type="hidden" name="item" value="{{ item.id }}">
+                    <label>Porciones cargadas <input class="form-control form-control-sm" type="number" min="{{ item.vendidas }}" name="porciones" value="{{ item.porciones }}" required></label>
+                    <label>Motivo <input class="form-control form-control-sm" name="motivo" maxlength="200" required placeholder="Ej.: llegaron 10 más"></label>
+                    <button class="btn btn-sm btn-primary" type="submit">Ajustar</button>
+                </form>
+                {% endif %}
+                <div class="d-flex flex-wrap gap-2">
+                    <form method="post" action="{% url 'menus:accion' menu.pk %}">{% csrf_token %}<input type="hidden" name="tipo" value="{{ tipo }}"><input type="hidden" name="item" value="{{ item.id }}">
+                        {% if item.agotado_manual %}<button class="btn btn-sm btn-outline-success" name="accion" value="reactivar">Reactivar</button>{% else %}<button class="btn btn-sm btn-outline-warning" name="accion" value="agotar">Marcar Agotado</button>{% endif %}
+                    </form>
+                    {% if not item.vendidas %}
+                    <form method="post" action="{% url 'menus:accion' menu.pk %}" data-confirm-message="Se eliminará «{{ item.nombre }}» del menú.">{% csrf_token %}<input type="hidden" name="accion" value="eliminar"><input type="hidden" name="tipo" value="{{ tipo }}"><input type="hidden" name="item" value="{{ item.id }}"><button class="btn btn-sm btn-outline-danger" type="submit">Eliminar</button></form>
+                    {% endif %}
+                </div>
+                {% if tipo == "plato" %}
+                <form method="post" action="{% url 'menus:accion' menu.pk %}" class="cq-item-form">{% csrf_token %}
+                    <input type="hidden" name="accion" value="agregar_acompanamiento"><input type="hidden" name="item" value="{{ item.id }}">
+                    <label>Acompañamiento <input class="form-control form-control-sm" name="nombre" maxlength="60" required placeholder="Ej.: arroz"></label>
+                    <label>Porciones <input class="form-control form-control-sm" type="number" min="0" name="porciones" placeholder="sin límite"></label>
+                    <button class="btn btn-sm btn-outline-primary" type="submit">Agregar acompañamiento</button>
+                </form>
+                {% endif %}
+            </div>
+        </details>
+    </td>
+</tr>

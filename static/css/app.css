@@ -857,3 +857,14 @@ body {
 /* Consumo anulado en el historial: visible pero atenuado. */
 .cq-anulado td { color: var(--bs-secondary-color); }
 .cq-anulado td:nth-child(3) { text-decoration: line-through; }
+
+/* Menú del día (administración) */
+.cq-num { width: 8.5rem; }
+.cq-menu-table td { vertical-align: middle; }
+.cq-menu-sub td { background: var(--bs-tertiary-bg); }
+.cq-item-acciones { display: inline-block; text-align: left; }
+.cq-item-acciones summary { list-style: none; }
+.cq-item-acciones summary::-webkit-details-marker { display: none; }
+.cq-item-panel { display: grid; gap: .75rem; padding: .75rem; margin-top: .5rem; min-width: 16rem; border: 1px solid var(--bs-border-color); border-radius: .5rem; background: var(--bs-body-bg); }
+.cq-item-form { display: grid; gap: .4rem; }
+.cq-item-form label { display: grid; gap: .2rem; font-size: .85rem; }

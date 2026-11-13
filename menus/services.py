@@ -344,3 +344,61 @@ def informe_cierre(menu):
                 sin_limite=item.porciones is None,
             ))
     return filas
+
+
+# --- Edición de ítems -------------------------------------------------------------------
+
+def crear_item(usuario, menu, nombre, porciones, umbral_aviso, tiempo=None, plato=None):
+    """Agrega un plato (con `tiempo`) o un acompañamiento (con `plato`) y registra la carga."""
+    _exigir_admin(usuario)
+    with transaction.atomic():
+        if plato is not None:
+            item = Acompanamiento.objects.create(
+                plato=plato, nombre=nombre, porciones=porciones, umbral_aviso=umbral_aviso,
+                orden=plato.acompanamientos.count(),
+            )
+        else:
+            item = PlatoDia.objects.create(
+                menu=menu, tiempo=tiempo, nombre=nombre, porciones=porciones, umbral_aviso=umbral_aviso,
+                orden=menu.platos.filter(tiempo=tiempo).count(),
+            )
+        registrar_carga(item, usuario, porciones)
+    return item
+
+
+def editar_item(usuario, tipo, item_id, nombre, umbral_aviso, porciones=None, cambiar_porciones=False):
+    """Edita nombre y umbral. Las porciones solo se editan aquí antes de publicar el menú;
+    después se usan ajustes con motivo."""
+    _exigir_admin(usuario)
+    with transaction.atomic():
+        item = _modelo_item(tipo).objects.select_for_update().get(pk=item_id)
+        menu = item.menu if tipo == "plato" else item.plato.menu
+        item.nombre = nombre
+        item.umbral_aviso = umbral_aviso
+        campos = ["nombre", "umbral_aviso"]
+        if cambiar_porciones:
+            if menu.publicado:
+                raise ErrorMenu("menu_publicado", "El menú está publicado: usa «Ajustar» e indica el motivo.")
+            if porciones is not None and porciones < item.vendidas:
+                raise ErrorMenu("ajuste_invalido", f"{item.nombre} ya vendió {item.vendidas}.")
+            # La suma de cargas siempre iguala las porciones (sin límite cuenta como 0).
+            registrar_carga(item, usuario, (porciones or 0) - (item.porciones or 0), "Corrección de carga")
+            item.porciones = porciones
+            campos.append("porciones")
+        item.save(update_fields=campos)
+    return item
+
+
+def eliminar_item(usuario, tipo, item_id):
+    """Elimina un ítem que nunca se vendió ni se pidió. Sus movimientos de carga se van con él."""
+    _exigir_admin(usuario)
+    with transaction.atomic():
+        item = _modelo_item(tipo).objects.select_for_update().get(pk=item_id)
+        if item.vendidas or item.pedido_items.exists() or item.movimientos.exclude(tipo=MovimientoPorcion.TIPO_CARGA).exists():
+            raise ErrorMenu("item_con_ventas", f"{item.nombre} ya tiene pedidos: márcalo Agotado en lugar de eliminarlo.")
+        if tipo == "plato":
+            if MovimientoPorcion.objects.filter(acompanamiento__plato=item).exclude(tipo=MovimientoPorcion.TIPO_CARGA).exists():
+                raise ErrorMenu("item_con_ventas", f"{item.nombre} ya tiene pedidos: márcalo Agotado.")
+            MovimientoPorcion.objects.filter(acompanamiento__plato=item).delete()
+        item.movimientos.all().delete()
+        item.delete()

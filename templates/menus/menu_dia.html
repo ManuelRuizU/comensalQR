@@ -9,6 +9,7 @@
     <div class="cq-actions">
         {% if menu %}<a class="btn btn-outline-primary" href="{% url 'menus:cierre' menu.pk %}">Informe de cierre</a>{% endif %}
         <a class="btn btn-outline-secondary" href="{% url 'menus:tiempos' %}">Tiempos</a>
+        <a class="btn btn-outline-secondary" href="{% url 'mesas:lista' %}{% if local %}?local={{ local.pk }}{% endif %}">Mesas</a>
     </div>
 </div>
 

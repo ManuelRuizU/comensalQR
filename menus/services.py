@@ -154,15 +154,30 @@ def _bloquear_items(plato_id, acompanamiento_id, menu):
     return plato, acomp
 
 
+def renovar_reservas(operador, token, ahora=None):
+    """Extiende 90 s desde ahora las reservas vigentes de este comensal y este garzón.
+
+    Se llama en cada interacción del garzón con la hoja. Las ya vencidas no se
+    reviven: si el garzón deja de interactuar, vencen como siempre.
+    """
+    ahora = ahora or timezone.now()
+    return ReservaPorcion.objects.filter(
+        token_seleccion=token, operador=operador, expira_en__gt=ahora
+    ).update(expira_en=ahora + DURACION_RESERVA)
+
+
 def reservar(operador, token, plato_id, acompanamiento_id=None):
     """Reserva 1 porción del plato (y su acompañamiento) por 90 s para el comensal `token`.
 
     Si el mismo comensal ya tenía una reserva en ese tiempo, se libera (cambio de opción).
+    Tocar una opción es una interacción: renueva las demás reservas del comensal,
+    aunque la opción tocada resulte agotada.
     """
     menu = menu_publicado_de_usuario(operador)
     if menu is None:
         raise ErrorMenu("menu_no_publicado", "No hay menú publicado hoy en tu local.")
     ahora = timezone.now()
+    renovar_reservas(operador, token, ahora)
     with transaction.atomic():
         plato, acomp = _bloquear_items(plato_id, acompanamiento_id, menu)
         ReservaPorcion.objects.filter(token_seleccion=token, plato__tiempo=plato.tiempo).delete()
@@ -194,11 +209,16 @@ def reservar(operador, token, plato_id, acompanamiento_id=None):
 
 
 def liberar(operador, token, tiempo_id=None):
-    """Libera las reservas del comensal (todas, o solo las de un tiempo)."""
+    """Libera las reservas del comensal (todas, o solo las de un tiempo).
+
+    Quitar la opción de un tiempo es una interacción: renueva las reservas restantes.
+    """
     reservas = ReservaPorcion.objects.filter(token_seleccion=token, operador=operador)
     if tiempo_id:
         reservas = reservas.filter(plato__tiempo_id=tiempo_id)
     eliminadas, _ = reservas.delete()
+    if tiempo_id:
+        renovar_reservas(operador, token)
     return eliminadas
 
 

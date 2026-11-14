@@ -11,6 +11,7 @@ urlpatterns = [
 	path("escaner/buscar/", views.buscar_por_rut, name="buscar_rut"),
 	path("escaner/reservar/", views.reservar_porcion, name="reservar"),
 	path("escaner/liberar/", views.liberar_reservas, name="liberar"),
+	path("escaner/renovar/", views.renovar, name="renovar"),
 	path("escaner/confirmar/", views.confirmar_pedido, name="confirmar"),
 	path("historial/", views.historial, name="historial"),
 	path("consumos/<int:consumo_id>/anular/", views.anular, name="anular"),

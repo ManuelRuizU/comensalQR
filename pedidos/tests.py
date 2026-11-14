@@ -2,6 +2,7 @@ import json
 import threading
 import unittest
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.db import connection, connections
 from django.test import TestCase, TransactionTestCase
@@ -65,6 +66,66 @@ class ReservaTests(TestCase):
 
         self.assertEqual(menu.liberar(self.e.garzon_a, token), 2)
         self.assertFalse(ReservaPorcion.objects.exists())
+
+    def en(self, segundos):
+        """Fija el reloj en t0 + segundos (t0 = inicio de la prueba)."""
+        return patch("django.utils.timezone.now", return_value=self.t0 + timedelta(seconds=segundos))
+
+    def reservar_pure_ajeno(self):
+        menu.reservar(self.e.garzon_b, nuevo_token(), self.e.chuleta.pk, self.e.pure.pk)
+
+    def test_cada_interaccion_renueva_las_reservas_del_comensal(self):
+        self.t0 = timezone.now()
+        token = nuevo_token()
+        with self.en(0):
+            menu.reservar(self.e.garzon_a, token, self.e.chuleta.pk, self.e.pure.pk)  # vence en t0+90
+        with self.en(60):
+            menu.reservar(self.e.garzon_a, token, self.e.naranja.pk)  # interacción: todo vence en t0+150
+        self.assertEqual(
+            set(ReservaPorcion.objects.filter(token_seleccion=token).values_list("expira_en", flat=True)),
+            {self.t0 + timedelta(seconds=150)},
+        )
+        with self.en(120), self.assertRaises(menu.ErrorMenu) as error:
+            self.reservar_pure_ajeno()  # sin renovación habría vencido en t0+90
+        self.assertEqual(error.exception.codigo, "reservada_por_otro")
+        with self.en(151):
+            self.reservar_pure_ajeno()  # el garzón dejó de interactuar: venció igual que antes
+
+    def test_quitar_un_tiempo_y_tocar_una_opcion_agotada_tambien_renuevan(self):
+        self.t0 = timezone.now()
+        token = nuevo_token()
+        menu.marcar_agotado("plato", self.e.pollo.pk, True, self.e.admin)
+        with self.en(0):
+            menu.reservar(self.e.garzon_a, token, self.e.chuleta.pk, self.e.pure.pk)
+            menu.reservar(self.e.garzon_a, token, self.e.naranja.pk)
+        with self.en(50), self.assertRaises(menu.ErrorMenu):
+            menu.reservar(self.e.garzon_a, token, self.e.pollo.pk)  # agotado, pero renueva hasta t0+140
+        with self.en(100):
+            menu.liberar(self.e.garzon_a, token, tiempo_id=self.e.naranja.tiempo_id)  # renueva hasta t0+190
+        reserva = ReservaPorcion.objects.get(token_seleccion=token)
+        self.assertEqual((reserva.plato, reserva.expira_en), (self.e.chuleta, self.t0 + timedelta(seconds=190)))
+
+    def test_sin_interaccion_vencen_y_renovar_no_revive_las_vencidas(self):
+        self.t0 = timezone.now()
+        token = nuevo_token()
+        with self.en(0):
+            menu.reservar(self.e.garzon_a, token, self.e.chuleta.pk, self.e.pure.pk)
+        with self.en(91):
+            self.assertEqual(menu.renovar_reservas(self.e.garzon_a, token), 0)
+            self.reservar_pure_ajeno()
+
+    def test_endpoint_renovar_solo_toca_las_reservas_propias(self):
+        self.t0 = timezone.now()
+        mio, ajeno = nuevo_token(), nuevo_token()
+        with self.en(0):
+            menu.reservar(self.e.garzon_a, mio, self.e.chuleta.pk, self.e.arroz.pk)
+            menu.reservar(self.e.garzon_b, ajeno, self.e.pollo.pk)
+        self.client.force_login(self.e.garzon_a)
+        with self.en(30):
+            respuesta = self.client.post(reverse("consumos:renovar"), {"selection_token": str(mio)})
+        self.assertEqual(respuesta.json(), {"ok": True, "renewed": 1})
+        self.assertEqual(ReservaPorcion.objects.get(token_seleccion=mio).expira_en, self.t0 + timedelta(seconds=120))
+        self.assertEqual(ReservaPorcion.objects.get(token_seleccion=ajeno).expira_en, self.t0 + timedelta(seconds=90))
 
     def test_plato_con_acompanamientos_exige_uno(self):
         with self.assertRaises(menu.ErrorMenu) as error:

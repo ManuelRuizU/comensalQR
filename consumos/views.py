@@ -22,6 +22,7 @@ from menus.services import (
     disponibilidad,
     liberar,
     menu_publicado_de_usuario,
+    renovar_reservas,
     reservar,
     ultima_seleccion,
 )
@@ -312,6 +313,16 @@ def liberar_reservas(request):
     tiempo = request.POST.get("tiempo", "")
     liberadas = liberar(request.user, token, int(tiempo) if tiempo.isdigit() else None)
     return JsonResponse({"ok": True, "released": liberadas})
+
+
+@user_passes_test(operador_o_administrador, login_url="login")
+@require_POST
+def renovar(request):
+    """Interacción en la hoja que no reserva ni libera: renueva 90 s las reservas vigentes."""
+    token = _token_seleccion(request)
+    if token is None:
+        return JsonResponse({"ok": False}, status=400)
+    return JsonResponse({"ok": True, "renewed": renovar_reservas(request.user, token)})
 
 
 @user_passes_test(operador_o_administrador, login_url="login")

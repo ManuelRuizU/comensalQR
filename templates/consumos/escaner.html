@@ -91,6 +91,7 @@
     const URL_BUSCAR = "{% url 'consumos:buscar_rut' %}";
     const URL_RESERVAR = "{% url 'consumos:reservar' %}";
     const URL_LIBERAR = "{% url 'consumos:liberar' %}";
+    const URL_RENOVAR = "{% url 'consumos:renovar' %}";
     const URL_CONFIRMAR = "{% url 'consumos:confirmar' %}";
     const URL_DISPONIBILIDAD = "{% url 'menus:disponibilidad_hoy' %}";
     const scanForm = document.getElementById("scan-form");
@@ -520,12 +521,19 @@
         postForm(URL_LIBERAR, { selection_token: hoja.token, tiempo: tiempoId }).catch(() => {});
     }
 
+    // Cada interacción renueva 90 s las reservas vigentes del comensal. Reservar y liberar
+    // ya renuevan en el servidor; esto cubre los toques que no reservan ni liberan nada.
+    function renovarReservas() {
+        if (hoja) postForm(URL_RENOVAR, { selection_token: hoja.token }).catch(() => {});
+    }
+
     async function tocarPlato(tiempo, plato) {
         if (!hoja) return;
         const elegido = hoja.seleccion[tiempo.id];
         if (elegido && elegido.plato === plato.id) {
             // Tocar de nuevo la opción elegida la quita (solo en tiempos opcionales).
             if (!tiempo.obligatorio) { delete hoja.seleccion[tiempo.id]; liberarTiempo(tiempo.id); pintarHoja(); }
+            else renovarReservas();
             return;
         }
         if (plato.acompanamientos.length) {
@@ -592,6 +600,7 @@
             await reservarOpcion(tiempo, plato.id, linea.acompanamiento);
         }
         if (faltan) errorHoja(`${faltan} plato(s) del pedido anterior ya no están disponibles.`);
+        if (faltan === hoja.previous.length) renovarReservas(); // no se reservó nada, pero hubo interacción
     }));
 
     btnConfirmar.addEventListener("click", async () => {
@@ -628,6 +637,7 @@
             // Falta una porción o un tiempo: el garzón ofrece otra opción en la misma hoja.
             hoja.ocupado = false;
             errorHoja(data.message);
+            renovarReservas();
             await refrescarMenu(true);
             pintarHoja();
             return;

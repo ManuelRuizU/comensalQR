@@ -26,7 +26,11 @@ class Pedido(models.Model):
     local = models.ForeignKey(Local, on_delete=models.PROTECT, related_name="pedidos")
     fecha = models.DateField(help_text="Día del pedido en America/Santiago.")
     folio = models.PositiveIntegerField()
-    # La mesa (FK a mesas.Mesa) se agrega en la Fase 2; hasta entonces todo es «Sin mesa».
+    mesa = models.ForeignKey(
+        "mesas.Mesa", on_delete=models.PROTECT, null=True, blank=True, related_name="pedidos",
+        help_text="Mesa activa en el escáner al confirmar. Vacío = sin mesa / para llevar.",
+    )
+    # Copia del nombre al confirmar: renombrar o desactivar la mesa no altera el historial.
     mesa_nombre = models.CharField(max_length=30, default=SIN_MESA)
     clave_idempotencia = models.UUIDField(unique=True)
     estado = models.CharField(max_length=10, choices=ESTADOS, default=PENDIENTE)

@@ -28,7 +28,7 @@
                     <form method="post" action="{% url 'menus:accion' menu.pk %}">{% csrf_token %}<input type="hidden" name="tipo" value="{{ tipo }}"><input type="hidden" name="item" value="{{ item.id }}">
                         {% if item.agotado_manual %}<button class="btn btn-sm btn-outline-success" name="accion" value="reactivar">Reactivar</button>{% else %}<button class="btn btn-sm btn-outline-warning" name="accion" value="agotar">Marcar Agotado</button>{% endif %}
                     </form>
-                    {% if not item.vendidas %}
+                    {% if not menu.publicado and not item.vendidas %}
                     <form method="post" action="{% url 'menus:accion' menu.pk %}" data-confirm-message="Se eliminará «{{ item.nombre }}» del menú.">{% csrf_token %}<input type="hidden" name="accion" value="eliminar"><input type="hidden" name="tipo" value="{{ tipo }}"><input type="hidden" name="item" value="{{ item.id }}"><button class="btn btn-sm btn-outline-danger" type="submit">Eliminar</button></form>
                     {% endif %}
                 </div>

@@ -4,6 +4,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
+from . import services
 from .escenario_prueba import crear_escenario
 from .models import MenuDia, MovimientoPorcion, PlatoDia, TiempoMenu
 
@@ -76,6 +77,33 @@ class AdministracionMenuTests(TestCase):
     def test_eliminar_plato_sin_ventas(self):
         self.client.post(self.accion, {"accion": "eliminar", "tipo": "plato", "item": self.e.pollo.pk})
         self.assertFalse(PlatoDia.objects.filter(pk=self.e.pollo.pk).exists())
+
+    def test_con_menu_publicado_no_se_elimina_solo_se_ajusta_o_agota(self):
+        self.e.menu.publicado = True
+        self.e.menu.save()
+
+        pantalla = self.client.get(reverse("menus:menu_dia"))
+        self.client.post(self.accion, {"accion": "eliminar", "tipo": "plato", "item": self.e.pollo.pk})
+        self.client.post(self.accion, {"accion": "eliminar", "tipo": "acompanamiento", "item": self.e.arroz.pk})
+
+        self.assertNotContains(pantalla, 'value="eliminar"')
+        self.assertTrue(PlatoDia.objects.filter(pk=self.e.pollo.pk).exists())
+        self.assertTrue(self.e.chuleta.acompanamientos.filter(pk=self.e.arroz.pk).exists())
+        with self.assertRaises(services.ErrorMenu) as error:
+            services.eliminar_item(self.e.admin, "plato", self.e.pollo.pk)
+        self.assertEqual(error.exception.codigo, "menu_publicado")
+        # Lo permitido con el menú publicado sigue funcionando.
+        services.ajustar_porciones("plato", self.e.pollo.pk, 12, self.e.admin, "Llegaron 2 más")
+        services.marcar_agotado("acompanamiento", self.e.arroz.pk, True, self.e.admin)
+        self.e.pollo.refresh_from_db(); self.e.arroz.refresh_from_db()
+        self.assertEqual((self.e.pollo.porciones, self.e.arroz.agotado), (12, True))
+
+    def test_menu_sin_publicar_no_elimina_items_con_ventas(self):
+        self.e.pollo.vendidas = 1
+        self.e.pollo.save()
+        with self.assertRaises(services.ErrorMenu) as error:
+            services.eliminar_item(self.e.admin, "plato", self.e.pollo.pk)
+        self.assertEqual(error.exception.codigo, "item_con_ventas")
 
     def test_disponibilidad_con_etag_responde_304_si_nada_cambio(self):
         url = reverse("menus:disponibilidad", args=[self.e.menu.pk])

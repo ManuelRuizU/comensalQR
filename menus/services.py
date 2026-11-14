@@ -390,10 +390,20 @@ def editar_item(usuario, tipo, item_id, nombre, umbral_aviso, porciones=None, ca
 
 
 def eliminar_item(usuario, tipo, item_id):
-    """Elimina un ítem que nunca se vendió ni se pidió. Sus movimientos de carga se van con él."""
+    """Elimina un ítem de un menú NO publicado que nunca se vendió ni se pidió.
+
+    Con el menú publicado solo se ajustan porciones (con motivo) o se marca Agotado.
+    Los movimientos de carga del ítem se van con él.
+    """
     _exigir_admin(usuario)
     with transaction.atomic():
         item = _modelo_item(tipo).objects.select_for_update().get(pk=item_id)
+        menu = item.menu if tipo == "plato" else item.plato.menu
+        if menu.publicado:
+            raise ErrorMenu(
+                "menu_publicado",
+                f"El menú está publicado: no se puede eliminar {item.nombre}. Ajusta sus porciones o márcalo Agotado.",
+            )
         if item.vendidas or item.pedido_items.exists() or item.movimientos.exclude(tipo=MovimientoPorcion.TIPO_CARGA).exists():
             raise ErrorMenu("item_con_ventas", f"{item.nombre} ya tiene pedidos: márcalo Agotado en lugar de eliminarlo.")
         if tipo == "plato":

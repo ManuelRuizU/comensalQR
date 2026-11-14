@@ -537,3 +537,45 @@ class PedidosDelDiaTests(TestCase):
 
         consumo.refresh_from_db()
         self.assertTrue(consumo.anulado)
+
+
+class MesaEnPedidoTests(TestCase):
+    def setUp(self):
+        from locales.models import Local
+        from mesas.models import Mesa
+
+        self.e = crear_escenario()
+        self.mesa = Mesa.objects.create(local=self.e.local, nombre="Mesa 3")
+        otro_local = Local.objects.create(nombre="Otro local", direccion="Calle 9")
+        self.mesa_ajena = Mesa.objects.create(local=otro_local, nombre="Mesa 3")
+
+    def pedir(self, mesa_id):
+        return registrar_pedido(
+            self.e.trabajador.pk, self.e.garzon_a, nuevo_token(), [{"plato": self.e.pollo.pk}], mesa_id=mesa_id
+        )
+
+    def test_el_pedido_guarda_la_mesa_activa(self):
+        pedido = self.pedir(self.mesa.pk).pedido
+
+        self.assertEqual((pedido.mesa, pedido.mesa_nombre), (self.mesa, "Mesa 3"))
+        # Renombrar la mesa después no altera el historial del pedido.
+        self.mesa.nombre = "Terraza 1"
+        self.mesa.save()
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.mesa_nombre, "Mesa 3")
+
+    def test_sin_mesa(self):
+        pedido = self.pedir(None).pedido
+        self.assertEqual((pedido.mesa, pedido.mesa_nombre), (None, "Sin mesa"))
+
+    def test_mesa_inactiva_o_de_otro_local_se_rechaza_sin_crear_nada(self):
+        self.mesa.activa = False
+        self.mesa.save()
+        for mesa_id in (self.mesa.pk, self.mesa_ajena.pk, 999999, "x"):
+            with self.assertRaises(PedidoRechazado) as error:
+                self.pedir(mesa_id)
+            self.assertEqual(error.exception.codigo, "mesa_invalida")
+        self.assertFalse(Consumo.objects.exists())
+        self.assertFalse(FolioDiario.objects.exists())
+        self.e.pollo.refresh_from_db()
+        self.assertEqual(self.e.pollo.vendidas, 0)

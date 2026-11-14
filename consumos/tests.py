@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 from django.contrib import admin
 from django.contrib.auth import get_user_model
+from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError
 from django.test import RequestFactory, TestCase
 from django.urls import reverse
@@ -16,7 +17,12 @@ from operadores.models import Administrador, Operador
 from trabajadores.models import Trabajador
 
 from .models import Consumo
-from .services import ResultadoConsumo
+from .services import (
+    AnulacionInvalida,
+    ResultadoConsumo,
+    anular_consumo,
+    registrar_consumo_diario,
+)
 
 
 class ConsumoTests(TestCase):
@@ -125,7 +131,8 @@ class ConsumoTests(TestCase):
 
         self.assertEqual(
             set(consumo_admin.get_readonly_fields(request)),
-            {"trabajador", "fecha", "numero", "operador", "local", "registrado_en", "metodo"},
+            {"trabajador", "fecha", "numero", "operador", "local", "registrado_en", "metodo",
+             "anulado", "anulado_por", "anulado_en", "motivo_anulacion"},
         )
         self.assertFalse(consumo_admin.has_add_permission(request))
         self.assertFalse(consumo_admin.has_delete_permission(request))
@@ -429,3 +436,60 @@ class ConsumoPorLocalTests(TestCase):
         migracion.asignar_local_unico(apps, None)
         operador.refresh_from_db()
         self.assertEqual(operador.local, self.norte)
+
+
+class AnulacionConsumoTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.admin = User.objects.create_user(username="admin-anula", password="x", is_staff=True)
+        self.mozo = User.objects.create_user(username="mozo-anula", password="x")
+        Operador.objects.create(usuario=self.mozo)
+        empresa = Empresa.objects.create(
+            nombre="Empresa Anula", rut="76111111-6", direccion="Dir", encargado_personal="RRHH"
+        )
+        self.trabajador = Trabajador.objects.create(
+            nombre="Juan", apellido="Perez", rut="11111111-1", empresa=empresa
+        )
+
+    def registrar(self):
+        return registrar_consumo_diario(self.trabajador.pk, self.mozo)
+
+    def test_anulado_no_cuenta_para_el_cupo(self):
+        primero = self.registrar()
+        self.assertFalse(self.registrar().creado)  # cupo 1 agotado
+
+        anular_consumo(primero.consumo.pk, self.admin, "Se equivocó de trabajador")
+        segundo = self.registrar()
+
+        self.assertTrue(segundo.creado)
+        self.assertEqual(segundo.usados, 1)
+        self.assertEqual(segundo.consumo.numero, 2)  # el número del anulado no se reutiliza
+        primero.consumo.refresh_from_db()
+        self.assertTrue(primero.consumo.anulado)
+        self.assertEqual(primero.consumo.anulado_por, self.admin)
+        self.assertEqual(primero.consumo.motivo_anulacion, "Se equivocó de trabajador")
+
+    def test_solo_administrador_y_con_motivo(self):
+        consumo = self.registrar().consumo
+
+        with self.assertRaises(PermissionDenied):
+            anular_consumo(consumo.pk, self.mozo, "motivo")
+        with self.assertRaises(AnulacionInvalida):
+            anular_consumo(consumo.pk, self.admin, "   ")
+        anular_consumo(consumo.pk, self.admin, "motivo")
+        with self.assertRaises(AnulacionInvalida):
+            anular_consumo(consumo.pk, self.admin, "otra vez")
+
+    def test_totales_excluyen_anulados_e_historial_los_marca(self):
+        consumo = self.registrar().consumo
+        anular_consumo(consumo.pk, self.admin, "Prueba de anulación")
+        self.client.force_login(self.admin)
+
+        dashboard = self.client.get(reverse("consumos:dashboard"))
+        historial = self.client.get(reverse("consumos:historial"))
+
+        self.assertEqual(dashboard.context["total_hoy"], 0)
+        self.assertEqual(historial.context["total_vigentes"], 0)
+        self.assertEqual(historial.context["total_anulados"], 1)
+        self.assertContains(historial, "Anulado")
+        self.assertContains(historial, "Prueba de anulación")

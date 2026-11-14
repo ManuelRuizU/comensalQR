@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Tiempos del menú | ComensalQR{% endblock %}
+{% block content %}
+<div class="cq-heading">
+    <div><div class="cq-eyebrow">Configuración</div><h1>Tiempos del menú</h1><p class="cq-subtitle">Etapas del almuerzo. En un tiempo obligatorio el garzón debe elegir una opción para poder confirmar.</p></div>
+    <div class="cq-actions"><a class="btn btn-outline-secondary" href="{% url 'menus:menu_dia' %}">Volver al menú</a></div>
+</div>
+<div class="row g-4">
+    <div class="col-12 col-lg-7"><div class="cq-card">
+        <div class="cq-table-wrap"><table class="table cq-table">
+            <thead><tr><th>Orden</th><th>Tiempo</th><th>Obligatorio</th><th>Estado</th><th></th></tr></thead>
+            <tbody>{% for t in tiempos %}<tr><td>{{ t.orden }}</td><td class="fw-semibold">{{ t.nombre }}</td><td>{% if t.obligatorio %}Sí{% else %}No{% endif %}</td><td>{% if t.activo %}<span class="badge text-bg-success">Activo</span>{% else %}<span class="badge text-bg-secondary">Inactivo</span>{% endif %}</td><td><a class="btn btn-sm btn-outline-primary" href="?editar={{ t.pk }}">Editar</a></td></tr>{% endfor %}</tbody>
+        </table></div>
+    </div></div>
+    <div class="col-12 col-lg-5">
+        <form method="post" class="cq-card cq-form-card">{% csrf_token %}
+            <h2 class="h5 mb-3">{% if editando %}Editar «{{ editando.nombre }}»{% else %}Nuevo tiempo{% endif %}</h2>
+            {{ form.non_field_errors }}
+            {% for field in form %}<div class="cq-form-field{% if field.field.widget.input_type == 'checkbox' %} cq-switch-field{% endif %} mb-3{% if field.errors %} has-error{% endif %}">{{ field.errors }}{{ field.label_tag }}{{ field }}</div>{% endfor %}
+            <div class="cq-form-actions"><button class="btn btn-primary" type="submit">Guardar</button>{% if editando %}<a class="btn btn-outline-secondary" href="{% url 'menus:tiempos' %}">Cancelar</a>{% endif %}</div>
+        </form>
+    </div>
+</div>
+{% endblock %}

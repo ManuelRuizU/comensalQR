@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Menú del día | ComensalQR{% endblock %}
+{% block content %}
+<div class="cq-heading">
+    <div>
+        <div class="cq-eyebrow">Cocina</div><h1>Menú del día</h1>
+        <p class="cq-subtitle">{{ local|default:"Sin local" }} · {{ fecha|date:"l d/m/Y" }}</p>
+    </div>
+    <div class="cq-actions">
+        {% if menu %}<a class="btn btn-outline-primary" href="{% url 'menus:cierre' menu.pk %}">Informe de cierre</a>{% endif %}
+        <a class="btn btn-outline-secondary" href="{% url 'menus:tiempos' %}">Tiempos</a>
+    </div>
+</div>
+
+<form method="get" class="cq-card p-3 mb-4 d-flex flex-wrap gap-2 align-items-end">
+    {% if locales|length > 1 %}
+        <div><label class="form-label" for="sel-local">Local</label><select class="form-select" id="sel-local" name="local">{% for l in locales %}<option value="{{ l.pk }}" {% if l == local %}selected{% endif %}>{{ l.nombre }}</option>{% endfor %}</select></div>
+    {% elif local %}<input type="hidden" name="local" value="{{ local.pk }}">{% endif %}
+    <div><label class="form-label" for="sel-fecha">Fecha</label><input class="form-control" id="sel-fecha" type="date" name="fecha" value="{{ fecha|date:'Y-m-d' }}"></div>
+    <button class="btn btn-outline-primary" type="submit">Ver</button>
+</form>
+
+{% if not local %}
+    <div class="cq-banner cq-banner-warning">No hay locales activos. <a href="{% url 'locales:crear' %}">Crea un local</a> para cargar su menú.</div>
+{% elif not menu %}
+    <div class="cq-card p-3">
+        <p>No hay menú para este día. Mientras no se publique uno, el escáner registra los almuerzos como siempre, sin pedido.</p>
+        <div class="d-flex flex-wrap gap-3">
+            <form method="post" action="{% url 'menus:crear' %}">{% csrf_token %}<input type="hidden" name="local" value="{{ local.pk }}"><input type="hidden" name="fecha" value="{{ fecha|date:'Y-m-d' }}"><button class="btn btn-primary" type="submit">Crear menú vacío</button></form>
+            {% if menus_anteriores %}
+            <form method="post" action="{% url 'menus:crear' %}" class="d-flex gap-2">{% csrf_token %}<input type="hidden" name="local" value="{{ local.pk }}"><input type="hidden" name="fecha" value="{{ fecha|date:'Y-m-d' }}">
+                <select class="form-select" name="origen" aria-label="Menú a copiar">{% for m in menus_anteriores %}<option value="{{ m.pk }}">{{ m.fecha|date:"D d/m/Y" }}</option>{% endfor %}</select>
+                <button class="btn btn-outline-primary text-nowrap" type="submit">Copiar de…</button></form>
+            {% endif %}
+        </div>
+    </div>
+{% else %}
+    <div class="cq-banner {% if menu.publicado %}cq-banner-success{% else %}cq-banner-warning{% endif %} d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <span>{% if menu.publicado %}<strong>Publicado.</strong> Los garzones toman pedidos con este menú.{% else %}<strong>Borrador.</strong> Los garzones aún no lo ven: el escáner registra sin pedido.{% endif %}</span>
+        <form method="post" action="{% url 'menus:accion' menu.pk %}">{% csrf_token %}
+            {% if menu.publicado %}<input type="hidden" name="accion" value="despublicar"><button class="btn btn-outline-secondary btn-sm" type="submit">Ocultar</button>
+            {% else %}<input type="hidden" name="accion" value="publicar"><button class="btn btn-success btn-sm" type="submit">Publicar</button>{% endif %}
+        </form>
+    </div>
+
+    {% for seccion in secciones %}
+    <section class="cq-card p-3 mb-4">
+        <h2 class="h5">{{ seccion.tiempo.nombre }} {% if seccion.tiempo.obligatorio %}<span class="badge text-bg-primary">obligatorio</span>{% else %}<span class="badge text-bg-light">opcional</span>{% endif %}</h2>
+        {% if seccion.platos %}
+        <div class="cq-table-wrap cq-con-paneles"><table class="table cq-table cq-menu-table">
+            <thead><tr><th>Plato</th><th class="text-end">Cargadas</th><th class="text-end">Vendidas</th><th class="text-end">Reservadas</th><th class="text-end">Quedan</th><th>Estado</th><th></th></tr></thead>
+            <tbody>
+            {% for plato in seccion.platos %}
+                {% include "menus/_fila_item.html" with item=plato tipo="plato" %}
+                {% for acomp in plato.acompanamientos %}{% include "menus/_fila_item.html" with item=acomp tipo="acompanamiento" sub=True %}{% endfor %}
+            {% endfor %}
+            </tbody>
+        </table></div>
+        {% else %}<p class="text-secondary">Sin platos.{% if seccion.tiempo.obligatorio %} Al ser obligatorio, el menú no se puede publicar sin al menos uno.{% endif %}</p>{% endif %}
+        <form method="post" action="{% url 'menus:accion' menu.pk %}" class="d-flex flex-wrap gap-2 align-items-end mt-2">{% csrf_token %}
+            <input type="hidden" name="accion" value="agregar_plato"><input type="hidden" name="tiempo" value="{{ seccion.tiempo.pk }}">
+            <input class="form-control w-auto" name="nombre" maxlength="80" placeholder="Nuevo plato de {{ seccion.tiempo.nombre|lower }}" required aria-label="Nombre del plato">
+            <input class="form-control cq-num" name="porciones" type="number" min="0" placeholder="Porciones" aria-label="Porciones (vacío = sin límite)">
+            <input class="form-control cq-num" name="umbral_aviso" type="number" min="0" placeholder="Avisar desde" aria-label="Avisar desde">
+            <button class="btn btn-outline-primary" type="submit">Agregar</button>
+        </form>
+    </section>
+    {% endfor %}
+    <p class="text-secondary small">Porciones vacías = sin límite. «Quedan» descuenta las reservas vigentes de los garzones (90 s) y se actualiza cada 3 segundos.</p>
+{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}{% if menu %}
+<script>
+(function () {
+    const URL = "{% url 'menus:disponibilidad' menu.pk %}";
+    const ETIQUETAS = {disponible: ["Disponible", "success"], bajo: ["Quedan pocas", "warning"], agotado: ["Agotado", "secondary"], reservada_por_otro: ["Reservada", "secondary"]};
+    let etag = null;
+    function pintar(item, clave) {
+        const fila = document.querySelector(`[data-item="${clave}"]`);
+        if (!fila) return;
+        fila.querySelector("[data-c=vendidas]").textContent = item.vendidas;
+        fila.querySelector("[data-c=reservadas]").textContent = item.reservadas;
+        fila.querySelector("[data-c=quedan]").textContent = item.quedan === null ? "∞" : item.quedan;
+        const [texto, color] = ETIQUETAS[item.estado] || ["", "light"];
+        const badge = fila.querySelector("[data-c=estado]");
+        badge.textContent = item.agotado_manual ? "Agotado (manual)" : texto;
+        badge.className = `badge text-bg-${color}`;
+    }
+    async function actualizar() {
+        try {
+            const r = await fetch(URL, {headers: etag ? {"If-None-Match": etag} : {}});
+            if (r.status === 200) {
+                etag = r.headers.get("ETag");
+                const datos = await r.json();
+                datos.tiempos.forEach((t) => t.platos.forEach((p) => { pintar(p, `plato-${p.id}`); p.acompanamientos.forEach((a) => pintar(a, `acompanamiento-${a.id}`)); }));
+            }
+        } catch (e) { /* sin conexión: se reintenta en el siguiente ciclo */ }
+    }
+    setInterval(() => { if (document.visibilityState === "visible") actualizar(); }, 3000);
+})();
+</script>
+{% endif %}{% endblock %}

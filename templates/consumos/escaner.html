@@ -62,8 +62,26 @@
     <ul id="lista-ultimos" class="cq-sheet-list"></ul>
 </dialog>
 
+<dialog id="dlg-pedido" class="cq-sheet cq-pedido" aria-labelledby="pedido-nombre">
+    <div class="cq-sheet-head">
+        <div>
+            <h2 id="pedido-nombre"></h2>
+            <div class="cq-pedido-detalle" id="pedido-detalle"></div>
+        </div>
+        <button type="button" class="cq-sheet-close" id="pedido-cerrar" aria-label="Cancelar pedido">×</button>
+    </div>
+    <div id="pedido-tiempos" class="cq-pedido-tiempos"></div>
+    <p id="pedido-error" class="cq-sheet-error" role="alert" hidden></p>
+    <div class="cq-pedido-acciones">
+        <button type="button" class="btn btn-outline-secondary" id="pedido-anterior">Igual al anterior</button>
+        <button type="button" class="btn btn-outline-danger" id="pedido-cancelar">Cancelar</button>
+        <button type="button" class="btn btn-success" id="pedido-confirmar" disabled>Confirmar</button>
+    </div>
+</dialog>
+
 <form id="scan-form" hidden>{% csrf_token %}</form>
 {{ ultimos|json_script:"ultimos-data" }}
+{{ con_menu|json_script:"con-menu" }}
 {% endblock %}
 
 {% block extra_scripts %}
@@ -71,6 +89,11 @@
 <script>
     const URL_REGISTRO = "{% url 'consumos:escaner' %}";
     const URL_BUSCAR = "{% url 'consumos:buscar_rut' %}";
+    const URL_RESERVAR = "{% url 'consumos:reservar' %}";
+    const URL_LIBERAR = "{% url 'consumos:liberar' %}";
+    const URL_RENOVAR = "{% url 'consumos:renovar' %}";
+    const URL_CONFIRMAR = "{% url 'consumos:confirmar' %}";
+    const URL_DISPONIBILIDAD = "{% url 'menus:disponibilidad_hoy' %}";
     const scanForm = document.getElementById("scan-form");
     const stage = document.getElementById("scan-stage");
     const resultPanel = document.getElementById("scan-result");
@@ -169,7 +192,8 @@
     function showScanResult(data) {
         window.clearTimeout(resultTimerId);
         const tipo = data.status === "registered" ? "success" : data.status === "duplicate" ? "warning" : "danger";
-        const titulo = { success: "Registrado", warning: "Cupo agotado", danger: "No válido" }[tipo];
+        let titulo = { success: "Registrado", warning: "Cupo agotado", danger: "No válido" }[tipo];
+        if (tipo === "success" && data.folio) titulo = `Pedido ${data.folio} · ${data.table}`;
         const icono = { success: "✓", warning: "!", danger: "✕" }[tipo];
 
         resultPanel.replaceChildren();
@@ -183,6 +207,7 @@
             const detalle = [data.company];
             if (data.quota) detalle.push(`Almuerzo ${data.used} de ${data.quota}`);
             resultPanel.append(elemento("div", "cq-result-detail", detalle.join(" · ")));
+            if (tipo === "success" && data.items && data.items.length) resultPanel.append(elemento("div", "cq-result-detail", data.items.join(" · ")));
             if (tipo === "warning" && data.time) resultPanel.append(elemento("div", "cq-result-detail", `Último registro a las ${data.time}`));
         } else {
             resultPanel.append(elemento("div", "cq-result-detail", data.message || "El código no fue reconocido."));
@@ -210,7 +235,7 @@
         ultimos.forEach((item) => {
             const fila = elemento("li", "cq-sheet-item");
             const texto = elemento("div");
-            texto.append(elemento("strong", "", item.worker), elemento("span", "", `${item.company} · almuerzo ${item.number}${item.manual ? " · manual" : ""}`));
+            texto.append(elemento("strong", "", item.worker), elemento("span", "", `${item.company} · ${item.folio ? `pedido ${item.folio}` : `almuerzo ${item.number}`}${item.manual ? " · manual" : ""}`));
             fila.append(texto, elemento("span", "cq-sheet-time", item.time));
             listaUltimos.append(fila);
         });
@@ -219,7 +244,7 @@
     function actualizarContadores(data) {
         if (typeof data.today_total === "number") totalHoy.textContent = data.today_total;
         if (data.status === "registered") {
-            ultimos.unshift({ worker: data.worker, company: data.company, time: data.time, number: data.number, manual: data.manual });
+            ultimos.unshift({ worker: data.worker, company: data.company, time: data.time, number: data.number, manual: data.manual, folio: data.folio });
             ultimos = ultimos.slice(0, 5);
             pintarUltimos();
         }
@@ -256,6 +281,12 @@
         } finally {
             requestInProgress = false;
         }
+        if (result.status === "seleccion") {
+            // Hay menú publicado: el almuerzo se registra al confirmar el pedido.
+            statusText.textContent = "Elige los platos";
+            abrirHoja(result, campos);
+            return result;
+        }
         showScanResult(result);
         actualizarContadores(result);
         return result;
@@ -269,7 +300,7 @@
             ultimoVisto = ahora;
             return;
         }
-        if (requestInProgress || dlgManual.open) return;
+        if (requestInProgress || dlgManual.open || dlgPedido.open) return;
         ultimoToken = token;
         ultimoVisto = ahora;
         registrar({ token });
@@ -338,7 +369,7 @@
         dlgUltimos.showModal();
     });
     document.querySelectorAll("[data-cerrar]").forEach((boton) => boton.addEventListener("click", () => boton.closest("dialog").close()));
-    document.querySelectorAll("dialog").forEach((dialogo) => dialogo.addEventListener("click", (event) => {
+    document.querySelectorAll("dialog:not(#dlg-pedido)").forEach((dialogo) => dialogo.addEventListener("click", (event) => {
         if (event.target === dialogo) dialogo.close(); // toque fuera de la hoja
     }));
 
@@ -374,6 +405,286 @@
             resultadosRut.append(boton);
         });
     });
+
+    // --- Hoja de pedido (menú del día publicado) -----------------------------------
+    // Cada opción tocada reserva 1 porción por 90 s. La garantía real está al confirmar:
+    // el servidor vuelve a validar cupo y porciones con bloqueo de filas.
+    const dlgPedido = document.getElementById("dlg-pedido");
+    const pedidoTiempos = document.getElementById("pedido-tiempos");
+    const pedidoError = document.getElementById("pedido-error");
+    const btnConfirmar = document.getElementById("pedido-confirmar");
+    const btnAnterior = document.getElementById("pedido-anterior");
+    const ESTADO_TEXTO = { agotado: "Agotado", reservada_por_otro: "Agotado (reservada por otro garzón)" };
+    let hoja = null; // { campos, token, menu, previous, seleccion: {tiempoId: {plato, acompanamiento}} }
+    // Los toques se procesan en orden: un toque durante una reserva en curso no se pierde.
+    let cola = Promise.resolve();
+    function encolar(tarea) {
+        cola = cola.then(tarea).catch((error) => console.error(error));
+        return cola;
+    }
+
+    function postForm(url, campos) {
+        const formData = new FormData(scanForm);
+        Object.entries(campos).forEach(([clave, valor]) => formData.set(clave, valor ?? ""));
+        return fetch(url, { method: "POST", body: formData, headers: { "X-Requested-With": "XMLHttpRequest" } });
+    }
+
+    function errorHoja(mensaje) {
+        pedidoError.textContent = mensaje || "";
+        pedidoError.hidden = !mensaje;
+    }
+
+    const libre = (item) => item && !["agotado", "reservada_por_otro"].includes(item.estado);
+    const buscarPlato = (tiempo, id) => tiempo.platos.find((p) => p.id === id);
+
+    function textoQuedan(item) {
+        if (!libre(item)) return ESTADO_TEXTO[item.estado] || "Agotado";
+        return item.quedan === null ? "" : `quedan ${item.quedan}`;
+    }
+
+    function botonOpcion(item, seleccionado, alTocar) {
+        const boton = elemento("button", "cq-opcion");
+        boton.type = "button";
+        if (seleccionado) boton.classList.add("is-selected");
+        if (!libre(item) && !seleccionado) { boton.classList.add("is-off"); boton.disabled = true; }
+        else if (item.estado === "bajo") boton.classList.add("is-low");
+        boton.append(elemento("strong", "", item.nombre));
+        const quedan = textoQuedan(item);
+        if (quedan) boton.append(elemento("span", "", quedan));
+        boton.addEventListener("click", alTocar);
+        return boton;
+    }
+
+    function seleccionCompleta(tiempo) {
+        const elegido = hoja.seleccion[tiempo.id];
+        if (!elegido) return false;
+        const plato = buscarPlato(tiempo, elegido.plato);
+        return Boolean(plato) && (!plato.acompanamientos.length || Boolean(elegido.acompanamiento));
+    }
+
+    function actualizarConfirmar() {
+        const listo = hoja.menu.tiempos.every((t) => !t.obligatorio || seleccionCompleta(t))
+            && Object.keys(hoja.seleccion).length > 0
+            && hoja.menu.tiempos.every((t) => !hoja.seleccion[t.id] || seleccionCompleta(t));
+        btnConfirmar.disabled = !listo || hoja.ocupado;
+    }
+
+    function pintarHoja() {
+        pedidoTiempos.replaceChildren();
+        hoja.menu.tiempos.forEach((tiempo) => {
+            const fila = elemento("section", "cq-pedido-tiempo");
+            fila.append(elemento("h3", "", tiempo.obligatorio ? tiempo.nombre : `${tiempo.nombre} (opcional)`));
+            const opciones = elemento("div", "cq-opciones");
+            const elegido = hoja.seleccion[tiempo.id];
+            tiempo.platos.forEach((plato) => {
+                opciones.append(botonOpcion(plato, elegido && elegido.plato === plato.id, () => encolar(() => tocarPlato(tiempo, plato))));
+            });
+            fila.append(opciones);
+            const platoElegido = elegido && buscarPlato(tiempo, elegido.plato);
+            if (platoElegido && platoElegido.acompanamientos.length) {
+                const acomps = elemento("div", "cq-opciones cq-opciones-sub");
+                platoElegido.acompanamientos.forEach((acomp) => {
+                    acomps.append(botonOpcion(acomp, elegido.acompanamiento === acomp.id, () => encolar(() => tocarAcomp(tiempo, platoElegido, acomp))));
+                });
+                fila.append(acomps);
+            }
+            pedidoTiempos.append(fila);
+        });
+        btnAnterior.hidden = !hoja.previous.length;
+        actualizarConfirmar();
+    }
+
+    async function reservarOpcion(tiempo, platoId, acompId) {
+        hoja.ocupado = true;
+        actualizarConfirmar();
+        try {
+            const response = await postForm(URL_RESERVAR, { selection_token: hoja.token, plato: platoId, acompanamiento: acompId });
+            const data = await leerJson(response);
+            if (!response.ok) {
+                errorHoja(data.message || "No se pudo reservar.");
+                delete hoja.seleccion[tiempo.id];
+                await refrescarMenu(true);
+                return false;
+            }
+            errorHoja("");
+            return true;
+        } catch (error) {
+            errorHoja("Sin conexión con el servidor. Intenta de nuevo.");
+            return false;
+        } finally {
+            hoja.ocupado = false;
+            pintarHoja();
+        }
+    }
+
+    function liberarTiempo(tiempoId) {
+        postForm(URL_LIBERAR, { selection_token: hoja.token, tiempo: tiempoId }).catch(() => {});
+    }
+
+    // Cada interacción renueva 90 s las reservas vigentes del comensal. Reservar y liberar
+    // ya renuevan en el servidor; esto cubre los toques que no reservan ni liberan nada.
+    function renovarReservas() {
+        if (hoja) postForm(URL_RENOVAR, { selection_token: hoja.token }).catch(() => {});
+    }
+
+    async function tocarPlato(tiempo, plato) {
+        if (!hoja) return;
+        const elegido = hoja.seleccion[tiempo.id];
+        if (elegido && elegido.plato === plato.id) {
+            // Tocar de nuevo la opción elegida la quita (solo en tiempos opcionales).
+            if (!tiempo.obligatorio) { delete hoja.seleccion[tiempo.id]; liberarTiempo(tiempo.id); pintarHoja(); }
+            else renovarReservas();
+            return;
+        }
+        if (plato.acompanamientos.length) {
+            const disponibles = plato.acompanamientos.filter(libre);
+            const unico = disponibles.length === 1 ? disponibles[0].id : null;
+            hoja.seleccion[tiempo.id] = { plato: plato.id, acompanamiento: unico };
+            if (unico) await reservarOpcion(tiempo, plato.id, unico);
+            else { liberarTiempo(tiempo.id); pintarHoja(); }
+            return;
+        }
+        hoja.seleccion[tiempo.id] = { plato: plato.id, acompanamiento: null };
+        await reservarOpcion(tiempo, plato.id, null);
+    }
+
+    async function tocarAcomp(tiempo, plato, acomp) {
+        if (!hoja) return;
+        hoja.seleccion[tiempo.id] = { plato: plato.id, acompanamiento: acomp.id };
+        await reservarOpcion(tiempo, plato.id, acomp.id);
+    }
+
+    async function preseleccionar() {
+        // Si un tiempo tiene una sola opción disponible, se preselecciona.
+        if (!hoja) return;
+        for (const tiempo of hoja.menu.tiempos) {
+            const disponibles = tiempo.platos.filter(libre);
+            if (disponibles.length === 1 && !hoja.seleccion[tiempo.id]) await tocarPlato(tiempo, disponibles[0]);
+        }
+    }
+
+    function abrirHoja(data, campos) {
+        hoja = { campos, token: data.selection_token, menu: data.menu, previous: data.previous || [], seleccion: {}, ocupado: false, etag: null };
+        document.getElementById("pedido-nombre").textContent = data.worker;
+        document.getElementById("pedido-detalle").textContent =
+            `${data.company} · Almuerzo ${data.used + 1} de ${data.quota}${data.manual ? " · manual" : ""}`;
+        errorHoja("");
+        pintarHoja();
+        dlgPedido.showModal();
+        playTone(660, "sine", 0.08, 0.1);
+        vibrar(40);
+        encolar(preseleccionar);
+    }
+
+    function cerrarHoja({ liberarReservas }) {
+        if (hoja && liberarReservas) postForm(URL_LIBERAR, { selection_token: hoja.token }).catch(() => {});
+        hoja = null;
+        if (dlgPedido.open) dlgPedido.close();
+        statusText.textContent = "Apunta al código QR";
+    }
+
+    document.getElementById("pedido-cancelar").addEventListener("click", () => cerrarHoja({ liberarReservas: true }));
+    document.getElementById("pedido-cerrar").addEventListener("click", () => cerrarHoja({ liberarReservas: true }));
+    dlgPedido.addEventListener("cancel", (event) => { event.preventDefault(); cerrarHoja({ liberarReservas: true }); });
+
+    btnAnterior.addEventListener("click", () => encolar(async () => {
+        // Repite la última selección de este garzón, en lo que siga disponible.
+        if (!hoja) return;
+        let faltan = 0;
+        for (const linea of hoja.previous) {
+            const tiempo = hoja.menu.tiempos.find((t) => t.platos.some((p) => p.id === linea.plato));
+            const plato = tiempo && buscarPlato(tiempo, linea.plato);
+            const acomp = plato && linea.acompanamiento ? plato.acompanamientos.find((a) => a.id === linea.acompanamiento) : null;
+            if (!plato || !libre(plato) || (linea.acompanamiento && !libre(acomp))) { faltan += 1; continue; }
+            hoja.seleccion[tiempo.id] = { plato: plato.id, acompanamiento: linea.acompanamiento };
+            await reservarOpcion(tiempo, plato.id, linea.acompanamiento);
+        }
+        if (faltan) errorHoja(`${faltan} plato(s) del pedido anterior ya no están disponibles.`);
+        if (faltan === hoja.previous.length) renovarReservas(); // no se reservó nada, pero hubo interacción
+    }));
+
+    btnConfirmar.addEventListener("click", async () => {
+        if (!hoja || btnConfirmar.disabled) return;
+        await cola; // espera las reservas en curso antes de confirmar
+        if (!hoja) return;
+        hoja.ocupado = true;
+        actualizarConfirmar();
+        btnConfirmar.textContent = "Confirmando…";
+        const seleccion = Object.values(hoja.seleccion).map((s) => ({ plato: s.plato, acompanamiento: s.acompanamiento }));
+        let data;
+        let response;
+        try {
+            response = await postForm(URL_CONFIRMAR, {
+                ...hoja.campos, selection_token: hoja.token, seleccion: JSON.stringify(seleccion),
+            });
+            data = await leerJson(response);
+        } catch (error) {
+            // El reintento es seguro: el servidor reconoce la misma selección y no crea otro pedido.
+            errorHoja("Sin conexión con el servidor. Vuelve a tocar Confirmar.");
+            hoja.ocupado = false;
+            btnConfirmar.textContent = "Confirmar";
+            actualizarConfirmar();
+            return;
+        }
+        btnConfirmar.textContent = "Confirmar";
+        if (response.ok && data.status === "registered") {
+            cerrarHoja({ liberarReservas: false });
+            showScanResult(data);
+            actualizarContadores(data);
+            return;
+        }
+        if (["porcion_agotada", "seleccion_incompleta", "reservada_por_otro"].includes(data.code)) {
+            // Falta una porción o un tiempo: el garzón ofrece otra opción en la misma hoja.
+            hoja.ocupado = false;
+            errorHoja(data.message);
+            renovarReservas();
+            await refrescarMenu(true);
+            pintarHoja();
+            return;
+        }
+        cerrarHoja({ liberarReservas: true });
+        if (data.status !== "duplicate") data.status = "error";
+        showScanResult(data);
+        actualizarContadores(data);
+    });
+
+    // --- Disponibilidad por polling (cada 3 s, con ETag) ------------------------------
+    const conMenu = JSON.parse(document.getElementById("con-menu").textContent);
+    let etagMenu = null;
+    let estadosPrevios = {};
+
+    function avisarAgotados(menu) {
+        const ahora = {};
+        menu.tiempos.forEach((t) => t.platos.forEach((p) => {
+            ahora[`p${p.id}`] = [p.nombre, p.estado];
+            p.acompanamientos.forEach((a) => { ahora[`a${a.id}`] = [`${p.nombre} + ${a.nombre}`, a.estado]; });
+        }));
+        Object.entries(ahora).forEach(([clave, [nombre, estado]]) => {
+            const antes = estadosPrevios[clave];
+            if (antes && antes[1] !== "agotado" && estado === "agotado") window.cqShowToast(`Se agotó: ${nombre}`, "warning");
+        });
+        estadosPrevios = ahora;
+    }
+
+    async function refrescarMenu(forzar) {
+        const token = hoja ? hoja.token : "";
+        const url = `${URL_DISPONIBILIDAD}?${new URLSearchParams({ token })}`;
+        try {
+            const response = await fetch(url, { headers: !forzar && etagMenu ? { "If-None-Match": etagMenu } : {} });
+            if (response.status !== 200) return;
+            etagMenu = response.headers.get("ETag");
+            const menu = await response.json();
+            avisarAgotados(menu);
+            if (hoja && menu.menu_id) {
+                hoja.menu = menu;
+                if (!hoja.ocupado) pintarHoja();
+            }
+        } catch (error) { /* sin conexión: se reintenta en el siguiente ciclo */ }
+    }
+    if (conMenu) {
+        refrescarMenu(true);
+        window.setInterval(() => { if (document.visibilityState === "visible") refrescarMenu(false); }, 3000);
+    }
 
     // Solo códigos QR y, si el teléfono lo soporta, el detector nativo (más rápido).
     scanner = new Html5Qrcode("reader", {

@@ -1,0 +1,539 @@
+import json
+import threading
+import unittest
+from datetime import timedelta
+from unittest.mock import patch
+
+from django.db import connection, connections
+from django.test import TestCase, TransactionTestCase
+from django.urls import reverse
+from django.utils import timezone
+
+from consumos.models import Consumo
+from consumos.services import PedidoRechazado, anular_consumo, registrar_pedido
+from menus import services as menu
+from menus.escenario_prueba import crear_escenario, nuevo_token
+from menus.models import MovimientoPorcion, ReservaPorcion
+
+from .models import FolioDiario, Pedido
+from .services import cambiar_plato
+
+
+def chuleta_con(e, acomp):
+    return {"plato": e.chuleta.pk, "acompanamiento": acomp.pk}
+
+
+class ReservaTests(TestCase):
+    def setUp(self):
+        self.e = crear_escenario(porciones_pure=1)
+
+    def test_reserva_vencida_devuelve_la_porcion(self):
+        token = nuevo_token()
+        menu.reservar(self.e.garzon_a, token, self.e.chuleta.pk, self.e.pure.pk)
+        with self.assertRaises(menu.ErrorMenu) as error:
+            menu.reservar(self.e.garzon_b, nuevo_token(), self.e.chuleta.pk, self.e.pure.pk)
+        self.assertEqual(error.exception.codigo, "reservada_por_otro")
+
+        ReservaPorcion.objects.update(expira_en=timezone.now() - timedelta(seconds=1))
+
+        menu.reservar(self.e.garzon_b, nuevo_token(), self.e.chuleta.pk, self.e.pure.pk)
+        self.assertEqual(ReservaPorcion.objects.count(), 1)
+
+    def test_cambiar_de_opcion_libera_la_reserva_anterior(self):
+        token = nuevo_token()
+        menu.reservar(self.e.garzon_a, token, self.e.chuleta.pk, self.e.pure.pk)
+        menu.reservar(self.e.garzon_a, token, self.e.chuleta.pk, self.e.arroz.pk)
+
+        self.assertEqual(ReservaPorcion.objects.get(token_seleccion=token).acompanamiento, self.e.arroz)
+        menu.reservar(self.e.garzon_b, nuevo_token(), self.e.chuleta.pk, self.e.pure.pk)  # el puré quedó libre
+
+    def test_disponibilidad_muestra_reservada_por_otro_y_propias(self):
+        token = nuevo_token()
+        menu.reservar(self.e.garzon_a, token, self.e.chuleta.pk, self.e.pure.pk)
+
+        def pure(estado):
+            fondo = next(t for t in estado["tiempos"] if t["nombre"] == "Fondo")
+            chuleta = next(p for p in fondo["platos"] if p["id"] == self.e.chuleta.pk)
+            return next(a for a in chuleta["acompanamientos"] if a["id"] == self.e.pure.pk)
+
+        self.assertEqual(pure(menu.disponibilidad(self.e.menu))["estado"], "reservada_por_otro")
+        self.assertEqual(pure(menu.disponibilidad(self.e.menu, token=token))["quedan"], 1)
+
+    def test_cancelar_libera_todas(self):
+        token = nuevo_token()
+        menu.reservar(self.e.garzon_a, token, self.e.chuleta.pk, self.e.pure.pk)
+        menu.reservar(self.e.garzon_a, token, self.e.naranja.pk)
+
+        self.assertEqual(menu.liberar(self.e.garzon_a, token), 2)
+        self.assertFalse(ReservaPorcion.objects.exists())
+
+    def en(self, segundos):
+        """Fija el reloj en t0 + segundos (t0 = inicio de la prueba)."""
+        return patch("django.utils.timezone.now", return_value=self.t0 + timedelta(seconds=segundos))
+
+    def reservar_pure_ajeno(self):
+        menu.reservar(self.e.garzon_b, nuevo_token(), self.e.chuleta.pk, self.e.pure.pk)
+
+    def test_cada_interaccion_renueva_las_reservas_del_comensal(self):
+        self.t0 = timezone.now()
+        token = nuevo_token()
+        with self.en(0):
+            menu.reservar(self.e.garzon_a, token, self.e.chuleta.pk, self.e.pure.pk)  # vence en t0+90
+        with self.en(60):
+            menu.reservar(self.e.garzon_a, token, self.e.naranja.pk)  # interacción: todo vence en t0+150
+        self.assertEqual(
+            set(ReservaPorcion.objects.filter(token_seleccion=token).values_list("expira_en", flat=True)),
+            {self.t0 + timedelta(seconds=150)},
+        )
+        with self.en(120), self.assertRaises(menu.ErrorMenu) as error:
+            self.reservar_pure_ajeno()  # sin renovación habría vencido en t0+90
+        self.assertEqual(error.exception.codigo, "reservada_por_otro")
+        with self.en(151):
+            self.reservar_pure_ajeno()  # el garzón dejó de interactuar: venció igual que antes
+
+    def test_quitar_un_tiempo_y_tocar_una_opcion_agotada_tambien_renuevan(self):
+        self.t0 = timezone.now()
+        token = nuevo_token()
+        menu.marcar_agotado("plato", self.e.pollo.pk, True, self.e.admin)
+        with self.en(0):
+            menu.reservar(self.e.garzon_a, token, self.e.chuleta.pk, self.e.pure.pk)
+            menu.reservar(self.e.garzon_a, token, self.e.naranja.pk)
+        with self.en(50), self.assertRaises(menu.ErrorMenu):
+            menu.reservar(self.e.garzon_a, token, self.e.pollo.pk)  # agotado, pero renueva hasta t0+140
+        with self.en(100):
+            menu.liberar(self.e.garzon_a, token, tiempo_id=self.e.naranja.tiempo_id)  # renueva hasta t0+190
+        reserva = ReservaPorcion.objects.get(token_seleccion=token)
+        self.assertEqual((reserva.plato, reserva.expira_en), (self.e.chuleta, self.t0 + timedelta(seconds=190)))
+
+    def test_sin_interaccion_vencen_y_renovar_no_revive_las_vencidas(self):
+        self.t0 = timezone.now()
+        token = nuevo_token()
+        with self.en(0):
+            menu.reservar(self.e.garzon_a, token, self.e.chuleta.pk, self.e.pure.pk)
+        with self.en(91):
+            self.assertEqual(menu.renovar_reservas(self.e.garzon_a, token), 0)
+            self.reservar_pure_ajeno()
+
+    def test_endpoint_renovar_solo_toca_las_reservas_propias(self):
+        self.t0 = timezone.now()
+        mio, ajeno = nuevo_token(), nuevo_token()
+        with self.en(0):
+            menu.reservar(self.e.garzon_a, mio, self.e.chuleta.pk, self.e.arroz.pk)
+            menu.reservar(self.e.garzon_b, ajeno, self.e.pollo.pk)
+        self.client.force_login(self.e.garzon_a)
+        with self.en(30):
+            respuesta = self.client.post(reverse("consumos:renovar"), {"selection_token": str(mio)})
+        self.assertEqual(respuesta.json(), {"ok": True, "renewed": 1})
+        self.assertEqual(ReservaPorcion.objects.get(token_seleccion=mio).expira_en, self.t0 + timedelta(seconds=120))
+        self.assertEqual(ReservaPorcion.objects.get(token_seleccion=ajeno).expira_en, self.t0 + timedelta(seconds=90))
+
+    def test_plato_con_acompanamientos_exige_uno(self):
+        with self.assertRaises(menu.ErrorMenu) as error:
+            menu.reservar(self.e.garzon_a, nuevo_token(), self.e.chuleta.pk)
+        self.assertEqual(error.exception.codigo, "seleccion_incompleta")
+
+
+class RegistrarPedidoTests(TestCase):
+    def setUp(self):
+        self.e = crear_escenario()
+
+    def pedir(self, seleccion, garzon=None, trabajador=None, token=None):
+        return registrar_pedido(
+            (trabajador or self.e.trabajador).pk, garzon or self.e.garzon_a, token or nuevo_token(), seleccion
+        )
+
+    def test_confirmar_crea_consumo_pedido_folio_items_y_movimientos(self):
+        token = nuevo_token()
+        menu.reservar(self.e.garzon_a, token, self.e.chuleta.pk, self.e.arroz.pk)
+
+        resultado = self.pedir([chuleta_con(self.e, self.e.arroz), {"plato": self.e.naranja.pk}], token=token)
+
+        pedido = resultado.pedido
+        self.assertTrue(resultado.creado)
+        self.assertEqual((pedido.folio, pedido.estado, pedido.mesa_nombre), (1, "pendiente", "Sin mesa"))
+        self.assertEqual(pedido.consumo.local, self.e.local)
+        self.assertEqual([str(i) for i in pedido.items.all()], ["Chuleta de cerdo + Arroz", "Naranja"])
+        self.e.chuleta.refresh_from_db(); self.e.arroz.refresh_from_db(); self.e.naranja.refresh_from_db()
+        self.assertEqual((self.e.chuleta.vendidas, self.e.arroz.vendidas, self.e.naranja.vendidas), (1, 1, 1))
+        self.assertEqual(MovimientoPorcion.objects.filter(pedido=pedido, tipo="pedido", cantidad=-1).count(), 3)
+        self.assertFalse(ReservaPorcion.objects.exists())
+
+    def test_idempotencia_mismo_token_un_solo_pedido(self):
+        token = nuevo_token()
+        primero = self.pedir([chuleta_con(self.e, self.e.arroz)], token=token)
+        segundo = self.pedir([chuleta_con(self.e, self.e.arroz)], token=token)
+
+        self.assertFalse(segundo.creado)
+        self.assertEqual(primero.pedido.pk, segundo.pedido.pk)
+        self.assertEqual(Pedido.objects.count(), 1)
+        self.assertEqual(Consumo.objects.count(), 1)
+
+    def test_combinacion_sin_stock_de_acompanamiento(self):
+        self.e.pure.porciones = 0
+        self.e.pure.save()
+
+        with self.assertRaises(PedidoRechazado) as error:
+            self.pedir([chuleta_con(self.e, self.e.pure)])
+        self.assertEqual((error.exception.codigo, error.exception.item), ("porcion_agotada", "Puré"))
+        self.assertFalse(Consumo.objects.exists())
+        # La chuleta sigue disponible con arroz.
+        self.assertTrue(self.pedir([chuleta_con(self.e, self.e.arroz)]).creado)
+
+    def test_tiempo_obligatorio_faltante(self):
+        with self.assertRaises(PedidoRechazado) as error:
+            self.pedir([{"plato": self.e.naranja.pk}])
+        self.assertEqual(error.exception.codigo, "seleccion_incompleta")
+        self.assertIn("Fondo", error.exception.mensaje)
+        self.assertFalse(Consumo.objects.exists())
+
+    def test_falta_acompanamiento_o_dos_opciones_del_mismo_tiempo(self):
+        for seleccion in (
+            [{"plato": self.e.chuleta.pk}],
+            [chuleta_con(self.e, self.e.arroz), {"plato": self.e.pollo.pk}],
+        ):
+            with self.assertRaises(PedidoRechazado) as error:
+                self.pedir(seleccion)
+            self.assertEqual(error.exception.codigo, "seleccion_incompleta")
+
+    def test_cupo_agotado_no_crea_nada(self):
+        self.pedir([{"plato": self.e.pollo.pk}])
+        with self.assertRaises(PedidoRechazado) as error:
+            self.pedir([{"plato": self.e.pollo.pk}])
+        self.assertEqual(error.exception.codigo, "cupo_agotado")
+        self.assertEqual(Pedido.objects.count(), 1)
+        self.e.pollo.refresh_from_db()
+        self.assertEqual(self.e.pollo.vendidas, 1)
+
+    def test_sin_menu_publicado(self):
+        self.e.menu.publicado = False
+        self.e.menu.save()
+        with self.assertRaises(PedidoRechazado) as error:
+            self.pedir([{"plato": self.e.pollo.pk}])
+        self.assertEqual(error.exception.codigo, "menu_no_publicado")
+
+    def test_porcion_reservada_por_otro_no_se_puede_confirmar(self):
+        self.e.pollo.porciones = 1
+        self.e.pollo.save()
+        menu.reservar(self.e.garzon_b, nuevo_token(), self.e.pollo.pk)
+
+        with self.assertRaises(PedidoRechazado) as error:
+            self.pedir([{"plato": self.e.pollo.pk}])
+        self.assertEqual(error.exception.codigo, "porcion_agotada")
+
+    def test_agotado_manual(self):
+        menu.marcar_agotado("plato", self.e.pollo.pk, True, self.e.admin)
+        with self.assertRaises(PedidoRechazado):
+            self.pedir([{"plato": self.e.pollo.pk}])
+
+    def test_folio_correlativo_por_local_y_dia_sin_reutilizar_anulados(self):
+        primero = self.pedir([{"plato": self.e.pollo.pk}])
+        anular_consumo(primero.consumo.pk, self.e.admin, "Error de digitación")
+        segundo = self.pedir([{"plato": self.e.pollo.pk}])
+        tercero = self.pedir([{"plato": self.e.pollo.pk}], trabajador=self.e.otro)
+
+        self.assertEqual([primero.pedido.folio, segundo.pedido.folio, tercero.pedido.folio], [1, 2, 3])
+        self.assertEqual(FolioDiario.objects.get().ultimo, 3)
+
+
+class AnulacionYCambioTests(TestCase):
+    def setUp(self):
+        self.e = crear_escenario()
+        self.resultado = registrar_pedido(
+            self.e.trabajador.pk, self.e.garzon_a, nuevo_token(), [chuleta_con(self.e, self.e.pure)]
+        )
+
+    def recargar(self):
+        for item in (self.e.chuleta, self.e.pure, self.e.arroz, self.e.pollo):
+            item.refresh_from_db()
+
+    def test_anulado_no_cuenta_para_el_cupo_y_devuelve_la_porcion(self):
+        anular_consumo(self.resultado.consumo.pk, self.e.admin, "El comensal no almorzó")
+
+        self.recargar()
+        pedido = Pedido.objects.get()
+        self.assertEqual(pedido.estado, Pedido.ANULADO)
+        self.assertEqual((self.e.chuleta.vendidas, self.e.pure.vendidas), (0, 0))
+        self.assertEqual(MovimientoPorcion.objects.filter(tipo="anulacion", cantidad=1).count(), 2)
+        # Con cupo 1, puede volver a pedir.
+        nuevo = registrar_pedido(self.e.trabajador.pk, self.e.garzon_a, nuevo_token(), [{"plato": self.e.pollo.pk}])
+        self.assertTrue(nuevo.creado)
+        self.assertEqual(nuevo.usados, 1)
+
+    def test_cambio_de_plato_mueve_porciones(self):
+        linea = self.resultado.pedido.items.get()
+        cambiar_plato(linea.pk, self.e.chuleta.pk, self.e.arroz.pk, self.e.admin)
+        self.recargar()
+        self.assertEqual((self.e.chuleta.vendidas, self.e.pure.vendidas, self.e.arroz.vendidas), (1, 0, 1))
+
+        cambiar_plato(linea.pk, self.e.pollo.pk, None, self.e.admin)
+        self.recargar()
+        self.assertEqual((self.e.chuleta.vendidas, self.e.arroz.vendidas, self.e.pollo.vendidas), (0, 0, 1))
+        linea.refresh_from_db()
+        self.assertEqual((linea.plato_nombre, linea.acompanamiento_nombre), ("Pollo asado", ""))
+        filas = {f.nombre: f for f in menu.informe_cierre(self.e.menu)}
+        self.assertEqual((filas["Chuleta de cerdo"].servidas, filas["Pollo asado"].servidas), (0, 1))
+
+    def test_cambio_solo_en_pendiente(self):
+        Pedido.objects.update(estado=Pedido.LISTO)
+        with self.assertRaises(PedidoRechazado) as error:
+            cambiar_plato(self.resultado.pedido.items.get().pk, self.e.pollo.pk, None, self.e.admin)
+        self.assertEqual(error.exception.codigo, "pedido_no_pendiente")
+
+    def test_informe_cierre(self):
+        menu.ajustar_porciones("plato", self.e.chuleta.pk, 35, self.e.admin, "Llegó más carne")
+        filas = {f.nombre: f for f in menu.informe_cierre(self.e.menu)}
+        chuleta = filas["Chuleta de cerdo"]
+        self.assertEqual((chuleta.ajustes, chuleta.servidas, chuleta.quedan), (5, 1, 34))
+
+
+@unittest.skipUnless(connection.vendor == "postgresql", "Requiere PostgreSQL real (bloqueo de filas).")
+class ConcurrenciaPostgresTests(TransactionTestCase):
+    """Dos garzones confirmando a la vez: la transacción con bloqueo de filas decide."""
+
+    def setUp(self):
+        # TransactionTestCase vacía las tablas entre pruebas: se recrean los tiempos iniciales.
+        from menus.models import TiempoMenu
+
+        TiempoMenu.objects.get_or_create(nombre="Fondo", defaults={"orden": 1, "obligatorio": True})
+        TiempoMenu.objects.get_or_create(nombre="Postre", defaults={"orden": 3, "obligatorio": False})
+
+    def _en_paralelo(self, tareas):
+        barrera = threading.Barrier(len(tareas))
+        resultados = [None] * len(tareas)
+
+        def correr(i, tarea):
+            try:
+                barrera.wait()
+                resultados[i] = tarea()
+            except Exception as error:  # noqa: BLE001 - se inspecciona en la prueba
+                resultados[i] = error
+            finally:
+                connections.close_all()
+
+        hilos = [threading.Thread(target=correr, args=(i, t)) for i, t in enumerate(tareas)]
+        for hilo in hilos:
+            hilo.start()
+        for hilo in hilos:
+            hilo.join()
+        return resultados
+
+    def test_ultima_porcion_se_vende_una_sola_vez(self):
+        e = crear_escenario()
+        e.pollo.porciones = 1
+        e.pollo.save()
+
+        resultados = self._en_paralelo([
+            lambda: registrar_pedido(e.trabajador.pk, e.garzon_a, nuevo_token(), [{"plato": e.pollo.pk}]),
+            lambda: registrar_pedido(e.otro.pk, e.garzon_b, nuevo_token(), [{"plato": e.pollo.pk}]),
+        ])
+
+        creados = [r for r in resultados if not isinstance(r, Exception)]
+        rechazos = [r for r in resultados if isinstance(r, PedidoRechazado)]
+        self.assertEqual((len(creados), len(rechazos)), (1, 1), resultados)
+        self.assertEqual(rechazos[0].codigo, "porcion_agotada")
+        self.assertEqual(Pedido.objects.count(), 1)
+        self.assertEqual(Consumo.objects.count(), 1)
+        e.pollo.refresh_from_db()
+        self.assertEqual(e.pollo.vendidas, 1)
+
+    def test_folios_sin_saltos_ni_repetidos_bajo_concurrencia(self):
+        e = crear_escenario(cupo=10)
+        tareas = [
+            (lambda: registrar_pedido(e.trabajador.pk, e.garzon_a, nuevo_token(), [{"plato": e.pollo.pk}])),
+            (lambda: registrar_pedido(e.otro.pk, e.garzon_b, nuevo_token(), [{"plato": e.pollo.pk}])),
+        ] * 3
+
+        resultados = self._en_paralelo(tareas)
+
+        self.assertFalse([r for r in resultados if isinstance(r, Exception)], resultados)
+        folios = sorted(Pedido.objects.values_list("folio", flat=True))
+        self.assertEqual(folios, [1, 2, 3, 4, 5, 6])
+
+    def test_doble_clic_simultaneo_crea_un_solo_pedido(self):
+        e = crear_escenario()
+        token = nuevo_token()
+        resultados = self._en_paralelo([
+            lambda: registrar_pedido(e.trabajador.pk, e.garzon_a, token, [{"plato": e.pollo.pk}]),
+        ] * 2)
+
+        self.assertFalse([r for r in resultados if isinstance(r, Exception)], resultados)
+        self.assertEqual(Pedido.objects.count(), 1)
+        self.assertEqual(len({r.pedido.pk for r in resultados}), 1)
+
+
+class EscanerConMenuTests(TestCase):
+    def setUp(self):
+        self.e = crear_escenario()
+        self.client.force_login(self.e.garzon_a)
+
+    def escanear(self, **campos):
+        return self.client.post(reverse("consumos:escaner"), campos, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+
+    def qr(self):
+        return {"token": str(self.e.trabajador.token_qr)}
+
+    def confirmar(self, token, seleccion, **campos):
+        return self.client.post(
+            reverse("consumos:confirmar"),
+            {**(campos or self.qr()), "selection_token": token, "seleccion": json.dumps(seleccion)},
+        )
+
+    def test_escanear_abre_la_hoja_sin_registrar_nada(self):
+        datos = self.escanear(**self.qr()).json()
+
+        self.assertEqual(datos["status"], "seleccion")
+        self.assertEqual((datos["worker"], datos["used"], datos["quota"]), ("Javier Cid", 0, 1))
+        self.assertEqual([t["nombre"] for t in datos["menu"]["tiempos"]], ["Fondo", "Postre"])
+        self.assertFalse(Consumo.objects.exists())
+
+    def test_reservar_confirmar_y_resultado_con_folio(self):
+        token = self.escanear(**self.qr()).json()["selection_token"]
+        reserva = self.client.post(reverse("consumos:reservar"), {"selection_token": token, "plato": self.e.chuleta.pk, "acompanamiento": self.e.arroz.pk})
+        self.assertEqual(reserva.status_code, 200)
+
+        datos = self.confirmar(token, [chuleta_con(self.e, self.e.arroz)]).json()
+
+        self.assertEqual((datos["status"], datos["folio"], datos["message"]), ("registered", "0001", "Pedido 0001 · Sin mesa"))
+        self.assertEqual(datos["items"], ["Chuleta de cerdo + Arroz"])
+        self.assertEqual(Pedido.objects.get().consumo.metodo, Consumo.METODO_QR)
+        # Reintento de red con la misma selección: mismo pedido, sin crear otro.
+        self.assertEqual(self.confirmar(token, [chuleta_con(self.e, self.e.arroz)]).json()["folio"], "0001")
+        self.assertEqual(Pedido.objects.count(), 1)
+
+    def test_reserva_ajena_responde_reservada_por_otro(self):
+        self.e.pollo.porciones = 1
+        self.e.pollo.save()
+        menu.reservar(self.e.garzon_b, nuevo_token(), self.e.pollo.pk)
+
+        respuesta = self.client.post(reverse("consumos:reservar"), {"selection_token": str(nuevo_token()), "plato": self.e.pollo.pk})
+
+        self.assertEqual(respuesta.status_code, 409)
+        self.assertEqual(respuesta.json()["code"], "reservada_por_otro")
+
+    def test_porcion_agotada_al_confirmar_mantiene_la_hoja(self):
+        self.e.pollo.porciones = 0
+        self.e.pollo.save()
+
+        respuesta = self.confirmar(str(nuevo_token()), [{"plato": self.e.pollo.pk}])
+
+        self.assertEqual(respuesta.status_code, 409)
+        self.assertEqual((respuesta.json()["code"], respuesta.json()["item"]), ("porcion_agotada", "Pollo asado"))
+        self.assertFalse(Consumo.objects.exists())
+
+    def test_registro_manual_por_rut_usa_la_misma_hoja(self):
+        manual = {"trabajador_id": str(self.e.trabajador.pk)}
+        datos = self.escanear(**manual).json()
+        self.assertEqual((datos["status"], datos["manual"]), ("seleccion", True))
+
+        resultado = self.confirmar(datos["selection_token"], [{"plato": self.e.pollo.pk}], **manual).json()
+
+        self.assertEqual(resultado["status"], "registered")
+        self.assertEqual(Pedido.objects.get().consumo.metodo, Consumo.METODO_RUT)
+
+    def test_cupo_agotado_al_escanear(self):
+        registrar_pedido(self.e.trabajador.pk, self.e.garzon_a, nuevo_token(), [{"plato": self.e.pollo.pk}])
+
+        datos = self.escanear(**self.qr()).json()
+
+        self.assertEqual(datos["status"], "duplicate")
+        self.assertEqual(datos["message"], "Cupo diario agotado (1 de 1).")
+
+    def test_igual_al_anterior(self):
+        registrar_pedido(self.e.otro.pk, self.e.garzon_a, nuevo_token(), [chuleta_con(self.e, self.e.pure), {"plato": self.e.naranja.pk}])
+
+        datos = self.escanear(**self.qr()).json()
+
+        self.assertEqual(
+            datos["previous"],
+            [{"plato": self.e.chuleta.pk, "acompanamiento": self.e.pure.pk}, {"plato": self.e.naranja.pk, "acompanamiento": None}],
+        )
+
+    def test_sin_menu_publicado_el_escaner_funciona_como_v01(self):
+        self.e.menu.publicado = False
+        self.e.menu.save()
+
+        datos = self.escanear(**self.qr()).json()
+
+        self.assertEqual((datos["status"], datos["message"]), ("registered", "Almuerzo 1 de 1 registrado."))
+        consumo = Consumo.objects.get()
+        self.assertFalse(Pedido.objects.exists())
+        self.assertEqual(consumo.local, self.e.local)
+        self.assertEqual(self.escanear(**self.qr()).json()["status"], "duplicate")
+
+    def test_usuario_sin_local_escanea_como_v01(self):
+        from django.contrib.auth import get_user_model
+
+        sin_local = get_user_model().objects.create_user(username="root", password="x", is_staff=True)
+        self.client.force_login(sin_local)
+
+        self.assertEqual(self.escanear(**self.qr()).json()["status"], "registered")
+        self.assertFalse(Pedido.objects.exists())
+
+    def test_disponibilidad_de_hoy_con_etag(self):
+        url = reverse("menus:disponibilidad_hoy")
+        primera = self.client.get(url)
+        self.assertEqual(primera.json()["menu_id"], self.e.menu.pk)
+        self.assertEqual(self.client.get(url, HTTP_IF_NONE_MATCH=primera["ETag"]).status_code, 304)
+        menu.reservar(self.e.garzon_b, nuevo_token(), self.e.pollo.pk)
+        self.assertEqual(self.client.get(url, HTTP_IF_NONE_MATCH=primera["ETag"]).status_code, 200)
+
+
+class PedidosDelDiaTests(TestCase):
+    def setUp(self):
+        self.e = crear_escenario()
+        self.resultado = registrar_pedido(
+            self.e.trabajador.pk, self.e.garzon_a, nuevo_token(), [chuleta_con(self.e, self.e.pure)]
+        )
+        self.client.force_login(self.e.admin)
+
+    def test_lista_muestra_folio_platos_y_opciones_de_cambio(self):
+        response = self.client.get(reverse("pedidos:lista"))
+
+        self.assertContains(response, "0001")
+        self.assertContains(response, "Chuleta de cerdo + Puré")
+        self.assertContains(response, "Pollo asado")  # opción de cambio del mismo tiempo
+
+    def test_cambiar_plato_desde_la_pantalla(self):
+        item = self.resultado.pedido.items.get()
+        self.client.post(reverse("pedidos:cambiar_item", args=[item.pk]), {"opcion": f"{self.e.pollo.pk}:"})
+
+        item.refresh_from_db()
+        self.assertEqual(item.plato_nombre, "Pollo asado")
+
+    def test_anular_exige_motivo_y_devuelve_porciones(self):
+        url = reverse("consumos:anular", args=[self.resultado.consumo.pk])
+        self.client.post(url, {"motivo": ""})
+        self.assertFalse(Consumo.objects.get().anulado)
+
+        self.client.post(url, {"motivo": "No almorzó"})
+
+        self.assertTrue(Consumo.objects.get().anulado)
+        self.assertEqual(Pedido.objects.get().estado, Pedido.ANULADO)
+        self.e.pure.refresh_from_db()
+        self.assertEqual(self.e.pure.vendidas, 0)
+
+    def test_garzon_no_anula_ni_cambia(self):
+        self.client.force_login(self.e.garzon_a)
+        item = self.resultado.pedido.items.get()
+
+        self.client.post(reverse("consumos:anular", args=[self.resultado.consumo.pk]), {"motivo": "x"})
+        self.client.post(reverse("pedidos:cambiar_item", args=[item.pk]), {"opcion": f"{self.e.pollo.pk}:"})
+
+        self.assertFalse(Consumo.objects.get().anulado)
+        item.refresh_from_db()
+        self.assertEqual(item.plato_nombre, "Chuleta de cerdo")
+        self.assertEqual(self.client.get(reverse("pedidos:lista")).status_code, 302)
+
+    def test_anular_consumo_sin_pedido_desde_el_historial(self):
+        self.e.menu.publicado = False
+        self.e.menu.save()
+        from consumos.services import registrar_consumo_diario
+
+        consumo = registrar_consumo_diario(self.e.otro.pk, self.e.garzon_a).consumo
+        historial = self.client.get(reverse("consumos:historial"))
+        self.assertContains(historial, reverse("consumos:anular", args=[consumo.pk]))
+
+        self.client.post(reverse("consumos:anular", args=[consumo.pk]), {"motivo": "Prueba"})
+
+        consumo.refresh_from_db()
+        self.assertTrue(consumo.anulado)

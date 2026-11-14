@@ -853,3 +853,44 @@ body {
 .cq-sheet-time { font-weight: 800; }
 .cq-sheet-empty { color: var(--cq-muted); padding: 0.5rem 0; }
 
+
+/* Consumo anulado en el historial: visible pero atenuado. */
+.cq-anulado td { color: var(--bs-secondary-color); }
+.cq-anulado td:nth-child(3) { text-decoration: line-through; }
+
+/* Menú del día (administración) */
+.cq-num { width: 8.5rem; }
+.cq-menu-table td { vertical-align: middle; }
+.cq-menu-sub td { background: var(--bs-tertiary-bg); }
+.cq-item-acciones { display: inline-block; text-align: left; position: relative; }
+.cq-item-acciones summary { list-style: none; }
+.cq-item-acciones summary::-webkit-details-marker { display: none; }
+.cq-item-panel { display: grid; gap: .75rem; padding: .75rem; margin-top: .5rem; min-width: 16rem; border: 1px solid var(--bs-border-color); border-radius: .5rem; background: var(--bs-body-bg); }
+/* En tablas el panel flota sobre las filas siguientes en vez de estirar la fila. */
+td .cq-item-panel { position: absolute; right: 0; top: 100%; z-index: 20; box-shadow: 0 8px 24px rgba(0, 0, 0, .15); }
+td:not(.text-end) .cq-item-panel { right: auto; left: 0; }
+.cq-item-form { display: grid; gap: .4rem; }
+.cq-item-form label { display: grid; gap: .2rem; font-size: .85rem; }
+
+/* Hoja de pedido del escáner (menú del día) */
+.cq-pedido { max-height: 92vh; }
+.cq-pedido[open] { display: flex; flex-direction: column; }
+.cq-pedido h2 { font-size: 1.25rem; font-weight: 800; margin: 0; }
+.cq-pedido-detalle { color: var(--cq-muted); font-size: 0.9rem; }
+.cq-pedido-tiempos { overflow-y: auto; flex: 1; display: grid; gap: 0.9rem; padding: 0.25rem 0 0.5rem; }
+.cq-pedido-tiempo h3 { font-size: 0.8rem; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--cq-muted); margin: 0 0 0.4rem; }
+.cq-opciones { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0.5rem; }
+.cq-opciones-sub { margin-top: 0.5rem; padding-left: 0.75rem; border-left: 3px solid var(--cq-line); }
+.cq-opcion { min-height: 64px; border: 2px solid var(--cq-line); border-radius: 14px; background: var(--cq-paper); color: var(--cq-ink); padding: 0.55rem 0.7rem; text-align: left; display: flex; flex-direction: column; justify-content: center; gap: 0.1rem; }
+.cq-opcion strong { font-size: 1rem; line-height: 1.2; }
+.cq-opcion span { font-size: 0.8rem; color: var(--cq-muted); }
+.cq-opcion.is-selected { border-color: #0e8a5a; background: #dff5e9; }
+.cq-opcion.is-low { border-color: #f5a524; }
+.cq-opcion.is-low span { color: #9a5a00; font-weight: 700; }
+.cq-opcion.is-off { opacity: 0.55; background: #eceff1; }
+.cq-pedido-acciones { display: flex; gap: 0.5rem; padding-top: 0.6rem; border-top: 1px solid var(--cq-line); }
+.cq-pedido-acciones .btn { flex: 1; min-height: 56px; border-radius: 14px; font-weight: 700; }
+.cq-pedido-acciones #pedido-confirmar { flex: 1.5; }
+.cq-pedido-acciones .btn[hidden] { display: none; }
+/* Las tablas con paneles flotantes no recortan su contenido en pantallas medianas o más grandes. */
+@media (min-width: 768px) { .cq-table-wrap.cq-con-paneles { overflow: visible; } }

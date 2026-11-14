@@ -24,6 +24,8 @@
                     <a class="link-light" href="{% url 'consumos:escaner' %}">Escaner</a>
                     <a class="link-light" href="{% url 'consumos:historial' %}">Historial</a>
                     {% if request.user.is_staff %}
+                        <a class="link-light" href="{% url 'menus:menu_dia' %}">Menú</a>
+                        <a class="link-light" href="{% url 'pedidos:lista' %}">Pedidos</a>
                         <a class="link-light" href="{% url 'empresas:lista' %}">Empresas</a>
                         <a class="link-light" href="{% url 'locales:lista' %}">Locales</a>
                         <a class="link-light" href="{% url 'trabajadores:lista' %}">Trabajadores</a>

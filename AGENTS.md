@@ -3,7 +3,9 @@
 
 ## Estado actual
 
-Estamos construyendo el MVP v0.1.
+MVP v0.1 terminado. En desarrollo: v0.2 (menú del día, mesas, cocina e
+impresión), por fases, según `docs/v0.2-menu-mesas-cocina.md`. Esa
+especificación manda sobre este archivo en lo que toca a v0.2.
 
 ## Objetivo actual
 
@@ -35,12 +37,22 @@ Permitir que un restaurante registre mediante QR:
 - Gestión de operadores (activar/desactivar, cambiar clave y local)
 - Edición de trabajadores (datos, excepción de cupo y estado activo)
 
+## v0.2 — Fase 1 (en curso)
+
+- Menú del día por local con tiempos, platos, acompañamientos y porciones
+- Reserva temporal de porciones (90 s) y confirmación con bloqueo de filas
+- Pedido con folio diario al confirmar; el consumo nace con el pedido
+- Cambio de plato (pedido Pendiente) y anulación (solo administrador, con motivo)
+- Informe de cierre de porciones
+- Sin menú publicado hoy, el escáner funciona como en v0.1
+
+Las fases siguientes (mesas, cocina, impresión) no se implementan hasta que se
+pidan. Nada de la sección «Futuro» de la especificación.
+
 ## NO implementar todavía
 
 No implementar sin solicitud explícita:
 
-- Menús (planeado para v0.2: al escanear el QR, el garzón elige el almuerzo
-  desde una lista de opciones disponibles en esa misma pantalla)
 - Costos
 - IVA
 - Rentabilidad

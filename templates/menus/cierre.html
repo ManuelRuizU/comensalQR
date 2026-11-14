@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Informe de cierre | ComensalQR{% endblock %}
+{% block content %}
+<div class="cq-heading">
+    <div><div class="cq-eyebrow">Cierre</div><h1>Informe de cierre de porciones</h1><p class="cq-subtitle">{{ menu.local }} · {{ menu.fecha|date:"l d/m/Y" }}</p></div>
+    <div class="cq-actions"><a class="btn btn-outline-secondary" href="{{ volver }}">Volver al menú</a></div>
+</div>
+<div class="cq-card p-3">
+    <div class="cq-table-wrap"><table class="table cq-table">
+        <thead><tr><th>Tiempo</th><th>Ítem</th><th class="text-end">Cargadas</th><th class="text-end">Ajustes</th><th class="text-end">Servidas</th><th class="text-end">Anuladas</th><th class="text-end">Quedan</th></tr></thead>
+        <tbody>
+        {% for fila in filas %}<tr><td class="text-secondary">{{ fila.tiempo }}</td><td>{{ fila.nombre }}</td><td class="text-end">{% if fila.sin_limite %}sin límite{% else %}{{ fila.cargadas }}{% endif %}</td><td class="text-end">{% if fila.ajustes > 0 %}+{% endif %}{{ fila.ajustes }}</td><td class="text-end">{{ fila.servidas }}</td><td class="text-end">{{ fila.anuladas }}</td><td class="text-end fw-semibold">{% if fila.sin_limite %}—{% else %}{{ fila.quedan }}{% endif %}</td></tr>
+        {% empty %}<tr><td colspan="7" class="text-secondary">El menú no tiene platos.</td></tr>{% endfor %}
+        </tbody>
+    </table></div>
+    <p class="text-secondary small mb-0">Quedan = cargadas + ajustes − servidas + anuladas. «Servidas» incluye los pedidos anulados, que vuelven en «Anuladas». Los folios del día se agregan con la impresión (Fase 4).</p>
+</div>
+{% endblock %}

@@ -37,7 +37,7 @@ Permitir que un restaurante registre mediante QR:
 - Gestión de operadores (activar/desactivar, cambiar clave y local)
 - Edición de trabajadores (datos, excepción de cupo y estado activo)
 
-## v0.2 — Fase 1 (en curso)
+## v0.2 — Fase 1 (terminada)
 
 - Menú del día por local con tiempos, platos, acompañamientos y porciones
 - Reserva temporal de porciones (90 s) y confirmación con bloqueo de filas
@@ -46,7 +46,17 @@ Permitir que un restaurante registre mediante QR:
 - Informe de cierre de porciones
 - Sin menú publicado hoy, el escáner funciona como en v0.1
 
-Las fases siguientes (mesas, cocina, impresión) no se implementan hasta que se
+## v0.2 — Fase 2 (en curso): Mesas
+
+- Mesas por local con QR propio (token aleatorio), crear, desactivar y
+  reactivar, PDF A4 con sus QR
+- Modo mesa en el escáner: parte en «Sin mesa»; escanear una mesa la activa
+  hasta escanear otra, elegir «Sin mesa» o cerrar el escáner
+- El pedido guarda la mesa activa al confirmar; una mesa inactiva o de otro
+  local se rechaza
+- Mesa y folio visibles en el historial y en el resultado del escaneo
+
+Las fases siguientes (cocina, impresión) no se implementan hasta que se
 pidan. Nada de la sección «Futuro» de la especificación.
 
 ## NO implementar todavía

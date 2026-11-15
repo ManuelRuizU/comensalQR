@@ -29,6 +29,10 @@ def crear_escenario(porciones_chuleta=30, porciones_pure=15, porciones_arroz=15,
     trabajador = Trabajador.objects.create(nombre="Javier", apellido="Cid", rut="11111111-1", empresa=empresa)
     otro = Trabajador.objects.create(nombre="Ana", apellido="Soto", rut="22222222-2", empresa=empresa)
 
+    from mesas.models import Mesa
+
+    # En el local la mesa es obligatoria: el escenario trae una mesa activa.
+    mesa = Mesa.objects.create(local=local, nombre="Mesa 1")
     fondo = TiempoMenu.objects.get(nombre="Fondo")
     postre = TiempoMenu.objects.get(nombre="Postre")
     menu = MenuDia.objects.create(local=local, fecha=timezone.localdate(), publicado=publicado)

@@ -55,10 +55,10 @@ class AdministracionMesasTests(TestCase):
         respuesta = self.client.post(reverse("mesas:crear"), {"local": self.e.local.pk, "nombre": "Mesa 3"}, follow=True)
 
         self.assertContains(respuesta, "Ya existe «Mesa 3»")
-        self.assertEqual(Mesa.objects.count(), 1)
+        self.assertEqual(Mesa.objects.filter(nombre="Mesa 3").count(), 1)
 
     def test_pdf_con_los_qr_de_las_mesas_activas(self):
-        Mesa.objects.create(local=self.e.local, nombre="Mesa 1")
+        # El escenario ya trae «Mesa 1» activa.
         Mesa.objects.create(local=self.e.local, nombre="Mesa 2", activa=False)
 
         respuesta = self.client.get(reverse("mesas:pdf"), {"local": self.e.local.pk})
@@ -72,7 +72,7 @@ class AdministracionMesasTests(TestCase):
 
         from . import tarjetas
 
-        mesa = Mesa.objects.create(local=self.e.local, nombre="Mesa 1")
+        mesa = self.e.mesa
         with patch.object(tarjetas, "imagen_qr", wraps=tarjetas.imagen_qr) as qr:
             tarjeta = tarjetas.tarjeta_mesa(mesa)
 
@@ -83,7 +83,7 @@ class AdministracionMesasTests(TestCase):
         self.client.force_login(self.e.garzon_a)
         self.assertEqual(self.client.get(reverse("mesas:lista")).status_code, 302)
         self.client.post(reverse("mesas:crear"), {"local": self.e.local.pk, "nombre": "Mesa 9"})
-        self.assertFalse(Mesa.objects.exists())
+        self.assertFalse(Mesa.objects.filter(nombre="Mesa 9").exists())
 
     def test_pantalla_lista_las_mesas(self):
         Mesa.objects.create(local=self.e.local, nombre="Terraza 1")

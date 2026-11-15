@@ -4,7 +4,7 @@
 <div class="cq-heading">
     <div>
         <div class="cq-eyebrow">Configuración</div><h1>Mesas</h1>
-        <p class="cq-subtitle">{{ local|default:"Sin local" }}. El garzón escanea el QR de la mesa y luego a cada comensal; la mesa es opcional («Sin mesa»).</p>
+        <p class="cq-subtitle">{{ local|default:"Sin local" }}. El garzón escanea el QR de la mesa y luego a cada comensal: sin mesa no se registra ningún almuerzo en el local.</p>
     </div>
     <div class="cq-actions">
         {% if local %}<a class="btn btn-primary" href="{% url 'mesas:pdf' %}?local={{ local.pk }}">QR de todas (PDF)</a>{% endif %}

@@ -90,9 +90,12 @@ class EliminacionLogicaTrabajadorTests(TestCase):
         self.trabajador.save(update_fields=["activo", "eliminado_en"])
         self.client.force_login(self.operador)
 
+        from consumos.tests import dar_mesa
+
+        mesa = dar_mesa(self.operador)
         response = self.client.post(
             reverse("consumos:escaner"),
-            {"token": str(self.trabajador.token_qr)},
+            {"token": str(self.trabajador.token_qr), "mesa_id": mesa.pk},
             HTTP_X_REQUESTED_WITH="XMLHttpRequest",
         )
 

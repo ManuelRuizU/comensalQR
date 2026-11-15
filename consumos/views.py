@@ -40,7 +40,7 @@ from .services import (
     estado_cupo,
     registrar_consumo_diario,
     registrar_pedido,
-    validar_mesa_o_despacho,
+    validar_mesa,
 )
 
 
@@ -79,7 +79,7 @@ def dashboard(request):
 def historial(request):
     es_admin = request.user.is_staff
     consumos = Consumo.objects.select_related(
-        "trabajador", "trabajador__empresa", "operador", "local", "anulado_por", "pedido"
+        "trabajador", "trabajador__empresa", "operador", "local", "anulado_por", "pedido", "mesa"
     )
 
     if es_admin:
@@ -150,9 +150,10 @@ def _ultimos_del_operador(usuario, fecha, limite=5):
             "number": consumo.numero,
             "manual": consumo.metodo == Consumo.METODO_RUT,
             "folio": consumo.pedido.folio_texto if getattr(consumo, "pedido", None) else None,
+            "table": consumo.pedido.mesa_nombre if getattr(consumo, "pedido", None) else (consumo.mesa.nombre if consumo.mesa else ""),
         }
         for consumo in consumos_vigentes().filter(operador=usuario, fecha=fecha)
-        .select_related("trabajador", "trabajador__empresa", "pedido")
+        .select_related("trabajador", "trabajador__empresa", "pedido", "mesa")
         .order_by("-registrado_en")[:limite]
     ]
 
@@ -219,19 +220,11 @@ def _es_qr_de_mesa(request):
 
 
 def _escaneo_de_mesa(request, hoy):
-    """Escanear una mesa activa el modo mesa del escáner (solo con menú publicado)."""
+    """Escanear una mesa activa el modo mesa del escáner, con o sin menú publicado."""
     try:
         mesa = identificar_mesa(request.POST.get("token", ""), request.user)
     except MesaInvalida as error:
         return _respuesta_error(error.mensaje, hoy, code=error.codigo)
-    if menu_publicado_de_usuario(request.user, hoy) is None:
-        return JsonResponse({
-            "ok": True,
-            "status": "mesa_sin_menu",
-            "table": mesa.nombre,
-            "message": f"{mesa.nombre}: hoy no hay menú publicado; los almuerzos se registran sin pedido ni mesa.",
-            "today_total": _total_hoy(hoy),
-        })
     return JsonResponse({
         "ok": True,
         "status": "mesa",
@@ -255,6 +248,7 @@ def escaner(request):
                 "ultimos": _ultimos_del_operador(request.user, hoy),
                 "local": local_de_usuario(request.user),
                 "con_menu": menu_publicado_de_usuario(request.user, hoy) is not None,
+                "sin_mesas": not Mesa.objects.filter(local=local_de_usuario(request.user), activa=True).exists(),
             },
         )
 
@@ -265,21 +259,17 @@ def escaner(request):
     if error:
         return _respuesta_error(error, hoy)
 
+    # El escáner es solo para atención en el local: sin mesa no se toma ningún pedido
+    # ni se registra ningún almuerzo, con o sin menú. Los despachos van por su pantalla.
+    try:
+        mesa = validar_mesa(_mesa_id(request), local_de_usuario(request.user))
+    except PedidoRechazado as rechazo:
+        return _respuesta_sin_mesa(rechazo, hoy)
+
     menu = menu_publicado_de_usuario(request.user, hoy)
     if menu is not None:
         # v0.2: con menú publicado el escaneo no registra nada; abre la hoja de pedido.
         # El consumo nace al confirmar (registrar_pedido), que vuelve a validar todo con bloqueo.
-        # La mesa es obligatoria (salvo Despacho): sin ella no se abre la hoja ni se reserva nada.
-        try:
-            validar_mesa_o_despacho(_mesa_id(request), local_de_usuario(request.user), _es_despacho(request))
-        except PedidoRechazado as rechazo:
-            if rechazo.codigo == "mesa_obligatoria":
-                return JsonResponse(
-                    {"ok": False, "status": "sin_modo", "code": rechazo.codigo, "message": rechazo.mensaje,
-                     "today_total": _total_hoy(hoy)},
-                    status=409,
-                )
-            return _respuesta_error(rechazo.mensaje, hoy, status=409, code=rechazo.codigo)
         try:
             trabajador, usados, cupo = estado_cupo(trabajador.pk, hoy)
         except TrabajadorNoDisponible:
@@ -303,7 +293,7 @@ def escaner(request):
 
     # v0.1: sin menú publicado hoy, el escaneo registra el almuerzo directamente.
     try:
-        resultado = registrar_consumo_diario(trabajador.pk, request.user, fecha=hoy, metodo=metodo)
+        resultado = registrar_consumo_diario(trabajador.pk, request.user, fecha=hoy, metodo=metodo, mesa=mesa)
     except TrabajadorNoDisponible:
         return _respuesta_error(MENSAJE_NO_DISPONIBLE, hoy)
 
@@ -316,6 +306,7 @@ def escaner(request):
         "number": resultado.consumo.numero,
         "manual": metodo == Consumo.METODO_RUT,
         "time": timezone.localtime(resultado.consumo.registrado_en).strftime("%H:%M"),
+        "table": mesa.nombre,
         "today_total": _total_hoy(hoy),
     }
     if resultado.creado:
@@ -335,8 +326,15 @@ def _mesa_id(request):
     return request.POST.get("mesa_id", "").strip() or None
 
 
-def _es_despacho(request):
-    return request.POST.get("despacho") == "1"
+def _respuesta_sin_mesa(rechazo, hoy):
+    """Sin mesa (aviso naranja «Escanea primero la mesa») o mesa inválida (rojo)."""
+    if rechazo.codigo == "mesa_obligatoria":
+        return JsonResponse(
+            {"ok": False, "status": "sin_mesa", "code": rechazo.codigo, "message": rechazo.mensaje,
+             "today_total": _total_hoy(hoy)},
+            status=409,
+        )
+    return _respuesta_error(rechazo.mensaje, hoy, status=409, code=rechazo.codigo)
 
 
 def _token_seleccion(request):
@@ -405,7 +403,7 @@ def confirmar_pedido(request):
     try:
         resultado = registrar_pedido(
             trabajador.pk, request.user, token, seleccion, metodo=metodo, fecha=hoy,
-            mesa_id=_mesa_id(request), despacho=_es_despacho(request),
+            mesa_id=_mesa_id(request),
         )
     except PedidoRechazado as rechazo:
         if rechazo.codigo == "cupo_agotado":

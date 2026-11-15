@@ -354,6 +354,12 @@ def registrar_pedido(
                     raise PedidoRechazado(
                         "despacho_no_permitido", "Solo un administrador puede registrar pedidos de despacho."
                     )
+                from pedidos.despacho import lista_abierta
+
+                if not lista_abierta(trabajador.empresa, local, fecha):
+                    raise PedidoRechazado(
+                        "lista_cerrada", "La lista de despacho ya cerró: no se pueden agregar pedidos."
+                    )
                 mesa = None
             else:
                 mesa = validar_mesa(mesa_id, local)

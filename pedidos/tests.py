@@ -16,6 +16,7 @@ from menus import services as menu
 from menus.escenario_prueba import crear_escenario, nuevo_token
 from menus.models import MovimientoPorcion, ReservaPorcion
 
+from . import despacho
 from .models import FolioDiario, Pedido
 from .services import cambiar_plato
 
@@ -810,3 +811,127 @@ class EtiquetaYConfiguracionDespachoTests(TestCase):
         empresa.refresh_from_db(); self.e.local.refresh_from_db()
         self.assertEqual((empresa.hora_cierre_despacho, empresa.tipo_envase), (datetime.time(9, 30), "marmita"))
         self.assertEqual(self.e.local.hora_cierre_despacho, datetime.time(11, 15))
+
+
+class DespachoServicioTests(TestCase):
+    """Lista nominal de despacho: solo administrador, antes del cierre, éxito parcial."""
+
+    def setUp(self):
+        from trabajadores.models import Trabajador
+
+        self.e = crear_escenario()
+        self.empresa = self.e.trabajador.empresa
+        self.e.pollo.porciones = None  # sin límite: estas pruebas miden cupo y cierre
+        self.e.pollo.save()
+        for i in range(28):  # 30 trabajadores en la empresa (incluye los 2 del escenario)
+            Trabajador.objects.create(nombre=f"T{i:02d}", apellido="Despacho", rut=_rut_valido(30000000 + i), empresa=self.empresa)
+        self.hoy = timezone.localdate()
+
+    def a_las(self, hora, minuto=0):
+        import datetime
+
+        momento = timezone.make_aware(datetime.datetime.combine(self.hoy, datetime.time(hora, minuto)))
+        return patch("django.utils.timezone.now", return_value=momento)
+
+    def filas(self, trabajadores=None):
+        trabajadores = trabajadores or self.empresa.trabajadores.filter(eliminado_en__isnull=True)
+        return [{"trabajador": t, "token": nuevo_token(), "seleccion": [{"plato": self.e.pollo.pk}]} for t in trabajadores]
+
+    def test_lista_de_30_con_uno_sin_cupo_crea_29_e_informa_1(self):
+        with self.a_las(8):
+            registrar_pedido(self.e.otro.pk, self.e.garzon_a, nuevo_token(), [{"plato": self.e.pollo.pk}])  # ya almorzó
+            resultado = despacho.confirmar_lista(self.e.admin, self.empresa, self.hoy, self.filas())
+
+        self.assertEqual((len(resultado.creados), resultado.total_errores), (29, 1))
+        trabajador, codigo, mensaje = resultado.errores[0]
+        self.assertEqual((trabajador, codigo), (self.e.otro, "cupo_agotado"))
+        self.assertIn("Cupo diario agotado", mensaje)
+        pedidos = despacho.pedidos_de_despacho(self.empresa, self.e.local, self.hoy)
+        self.assertEqual(pedidos.count(), 29)
+        self.assertTrue(all(p.es_despacho and p.mesa is None for p in pedidos))
+        self.assertEqual({p.mesa_nombre for p in pedidos}, {"Despacho · Constructora ABC"})
+        self.assertEqual(sorted(p.folio for p in pedidos), list(range(2, 31)))  # el folio 1 fue el del local
+
+    def test_operador_no_puede_crear_pedidos_de_despacho(self):
+        from django.core.exceptions import PermissionDenied
+
+        with self.a_las(8):
+            with self.assertRaises(PermissionDenied):
+                despacho.confirmar_lista(self.e.garzon_a, self.empresa, self.hoy, self.filas())
+            with self.assertRaises(PedidoRechazado) as error:
+                _registrar_pedido(self.e.trabajador.pk, self.e.garzon_a, nuevo_token(), [{"plato": self.e.pollo.pk}], despacho=True)
+        self.assertEqual(error.exception.codigo, "despacho_no_permitido")
+        self.assertFalse(Pedido.objects.exists())
+
+    def test_despues_del_cierre_no_se_agrega_ni_cambia_solo_se_anula(self):
+        with self.a_las(9, 59):
+            resultado = despacho.confirmar_lista(self.e.admin, self.empresa, self.hoy, self.filas([self.e.trabajador]))
+        pedido = resultado.creados[0]
+
+        with self.a_las(10):
+            with self.assertRaises(despacho.ErrorDespacho) as error:
+                despacho.confirmar_lista(self.e.admin, self.empresa, self.hoy, self.filas([self.e.otro]))
+            self.assertEqual(error.exception.codigo, "lista_cerrada")
+            with self.assertRaises(PedidoRechazado) as directo:
+                _registrar_pedido(self.e.otro.pk, self.e.admin, nuevo_token(), [{"plato": self.e.pollo.pk}], despacho=True)
+            self.assertEqual(directo.exception.codigo, "lista_cerrada")
+            with self.assertRaises(PedidoRechazado) as cambio:
+                cambiar_plato(pedido.items.get().pk, self.e.chuleta.pk, self.e.arroz.pk, self.e.admin)
+            self.assertEqual(cambio.exception.codigo, "lista_cerrada")
+            anular_consumo(pedido.consumo_id, self.e.admin, "El trabajador avisó tarde que no venía")
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.estado, Pedido.ANULADO)
+
+    def test_la_excepcion_de_la_empresa_manda_sobre_el_local(self):
+        import datetime
+
+        self.empresa.hora_cierre_despacho = datetime.time(9, 0)
+        self.empresa.save()
+        with self.a_las(9, 30), self.assertRaises(despacho.ErrorDespacho):
+            despacho.confirmar_lista(self.e.admin, self.empresa, self.hoy, self.filas([self.e.trabajador]))
+
+        self.empresa.hora_cierre_despacho = datetime.time(11, 0)
+        self.empresa.save()
+        with self.a_las(10, 30):  # el local ya cerró (10:00), pero esta empresa cierra a las 11:00
+            resultado = despacho.confirmar_lista(self.e.admin, self.empresa, self.hoy, self.filas([self.e.trabajador]))
+        self.assertEqual(len(resultado.creados), 1)
+
+    def test_antes_del_cierre_se_cambia_plato_y_se_quita_trabajador(self):
+        with self.a_las(8):
+            resultado = despacho.confirmar_lista(
+                self.e.admin, self.empresa, self.hoy, self.filas([self.e.trabajador, self.e.otro])
+            )
+            uno, otro = resultado.creados
+            cambiar_plato(uno.items.get().pk, self.e.chuleta.pk, self.e.arroz.pk, self.e.admin)
+            quitado = despacho.confirmar_lista(self.e.admin, self.empresa, self.hoy, [], quitar=[otro])
+
+        uno.refresh_from_db(); otro.refresh_from_db()
+        self.assertEqual(str(uno.items.get()), "Chuleta de cerdo + Arroz")
+        self.assertEqual(len(quitado.quitados), 1)
+        self.assertEqual((otro.estado, otro.consumo.motivo_anulacion), (Pedido.ANULADO, despacho.MOTIVO_QUITADO))
+        self.assertEqual(despacho.pedidos_de_despacho(self.empresa, self.e.local, self.hoy).count(), 1)
+
+    def test_reintento_de_la_misma_lista_no_duplica(self):
+        filas = self.filas([self.e.trabajador])
+        with self.a_las(8):
+            despacho.confirmar_lista(self.e.admin, self.empresa, self.hoy, filas)
+            segundo = despacho.confirmar_lista(self.e.admin, self.empresa, self.hoy, filas)
+        self.assertEqual((len(segundo.creados), len(segundo.sin_cambios)), (0, 1))
+        self.assertEqual(Pedido.objects.count(), 1)
+
+    def test_totales_por_plato(self):
+        with self.a_las(8):
+            filas = self.filas([self.e.trabajador, self.e.otro])
+            filas[1]["seleccion"] = [chuleta_con(self.e, self.e.arroz)]
+            despacho.confirmar_lista(self.e.admin, self.empresa, self.hoy, filas)
+        pedidos = despacho.pedidos_de_despacho(self.empresa, self.e.local, self.hoy)
+        self.assertEqual(despacho.totales_por_plato(pedidos), [("Chuleta de cerdo + Arroz", 1), ("Pollo asado", 1)])
+
+
+def _rut_valido(cuerpo):
+    suma, factor = 0, 2
+    for digito in reversed(str(cuerpo)):
+        suma += int(digito) * factor
+        factor = 2 if factor == 7 else factor + 1
+    resto = 11 - (suma % 11)
+    return f"{cuerpo}-{'0' if resto == 11 else 'K' if resto == 10 else resto}"

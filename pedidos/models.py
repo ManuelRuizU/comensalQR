@@ -5,7 +5,10 @@ from locales.models import Local
 from menus.models import Acompanamiento, PlatoDia
 
 
+# Pedidos anteriores a la mesa obligatoria; los nuevos sin mesa son siempre «Despacho».
 SIN_MESA = "Sin mesa"
+# Colaciones que se envían a las empresas: única forma de confirmar un pedido sin mesa.
+DESPACHO = "Despacho"
 
 
 class Pedido(models.Model):

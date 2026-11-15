@@ -40,6 +40,7 @@ from .services import (
     estado_cupo,
     registrar_consumo_diario,
     registrar_pedido,
+    validar_mesa_o_despacho,
 )
 
 
@@ -268,6 +269,17 @@ def escaner(request):
     if menu is not None:
         # v0.2: con menú publicado el escaneo no registra nada; abre la hoja de pedido.
         # El consumo nace al confirmar (registrar_pedido), que vuelve a validar todo con bloqueo.
+        # La mesa es obligatoria (salvo Despacho): sin ella no se abre la hoja ni se reserva nada.
+        try:
+            validar_mesa_o_despacho(_mesa_id(request), local_de_usuario(request.user), _es_despacho(request))
+        except PedidoRechazado as rechazo:
+            if rechazo.codigo == "mesa_obligatoria":
+                return JsonResponse(
+                    {"ok": False, "status": "sin_modo", "code": rechazo.codigo, "message": rechazo.mensaje,
+                     "today_total": _total_hoy(hoy)},
+                    status=409,
+                )
+            return _respuesta_error(rechazo.mensaje, hoy, status=409, code=rechazo.codigo)
         try:
             trabajador, usados, cupo = estado_cupo(trabajador.pk, hoy)
         except TrabajadorNoDisponible:
@@ -317,6 +329,14 @@ def escaner(request):
             "message": f"Cupo diario agotado ({resultado.usados} de {resultado.cupo}).",
         })
     return JsonResponse(datos)
+
+
+def _mesa_id(request):
+    return request.POST.get("mesa_id", "").strip() or None
+
+
+def _es_despacho(request):
+    return request.POST.get("despacho") == "1"
 
 
 def _token_seleccion(request):
@@ -385,7 +405,7 @@ def confirmar_pedido(request):
     try:
         resultado = registrar_pedido(
             trabajador.pk, request.user, token, seleccion, metodo=metodo, fecha=hoy,
-            mesa_id=request.POST.get("mesa_id") or None,
+            mesa_id=_mesa_id(request), despacho=_es_despacho(request),
         )
     except PedidoRechazado as rechazo:
         if rechazo.codigo == "cupo_agotado":

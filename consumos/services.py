@@ -251,13 +251,18 @@ def _validar_porciones(lineas, token, ahora):
                 raise PedidoRechazado("porcion_agotada", f"{item.nombre}: agotado.", item.nombre)
 
 
-def _validar_mesa(mesa_id, local):
-    """Mesa activa del mismo local, o None para «Sin mesa». Se lee sin bloqueo."""
+def validar_mesa_o_despacho(mesa_id, local, despacho=False):
+    """Mesa activa del mismo local, o None si es despacho. Se lee sin bloqueo.
+
+    Sin mesa ni despacho el pedido se rechaza: la mesa es obligatoria.
+    """
     from mesas.models import Mesa
     from mesas.services import MesaInvalida, mesa_valida
 
     if mesa_id in (None, ""):
-        return None
+        if despacho:
+            return None
+        raise PedidoRechazado("mesa_obligatoria", "Primero escanea la mesa o elige Despacho.")
     try:
         mesa = Mesa.objects.filter(pk=int(mesa_id)).first()
     except (TypeError, ValueError):
@@ -292,16 +297,19 @@ def _mover_porcion(item, usuario, tipo, cantidad, pedido, motivo=""):
     )
 
 
-def registrar_pedido(trabajador_id, operador, token, seleccion, metodo=Consumo.METODO_QR, fecha=None, mesa_id=None):
+def registrar_pedido(
+    trabajador_id, operador, token, seleccion, metodo=Consumo.METODO_QR, fecha=None, mesa_id=None, despacho=False
+):
     """Confirma el pedido de un comensal: consumo + pedido + folio + ítems + movimientos.
 
-    `mesa_id` es la mesa activa en el escáner al confirmar (None = «Sin mesa»); debe
-    estar activa y ser del local de quien escanea.
+    La mesa es obligatoria: `mesa_id` es la mesa activa en el escáner al confirmar y debe
+    estar activa y ser del local de quien escanea. Sin mesa solo se acepta `despacho=True`
+    (colaciones que se envían a las empresas).
 
     Todo en una sola transacción; cualquier rechazo revierte todo (PedidoRechazado).
     Idempotente: el mismo `token` (token_seleccion) devuelve el mismo pedido sin crear otro.
     """
-    from pedidos.models import SIN_MESA, Pedido, PedidoItem
+    from pedidos.models import DESPACHO, Pedido, PedidoItem
 
     try:
         token = uuid.UUID(str(token))
@@ -335,7 +343,7 @@ def registrar_pedido(trabajador_id, operador, token, seleccion, metodo=Consumo.M
             menu = MenuDia.objects.filter(local=local, fecha=fecha, publicado=True).first() if local else None
             if menu is None:
                 raise PedidoRechazado("menu_no_publicado", "No hay menú publicado hoy en tu local.")
-            mesa = _validar_mesa(mesa_id, local)
+            mesa = validar_mesa_o_despacho(mesa_id, local, despacho)
 
             platos, acomps = _bloquear_items_seleccion(menu, pares)
             lineas = _validar_seleccion(menu, pares, platos, acomps)
@@ -348,7 +356,7 @@ def registrar_pedido(trabajador_id, operador, token, seleccion, metodo=Consumo.M
                 fecha=fecha,
                 folio=_siguiente_folio(local, fecha),
                 mesa=mesa,
-                mesa_nombre=mesa.nombre if mesa else SIN_MESA,
+                mesa_nombre=mesa.nombre if mesa else DESPACHO,
                 clave_idempotencia=token,
             )
             items = []

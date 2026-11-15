@@ -10,13 +10,22 @@ from django.urls import reverse
 from django.utils import timezone
 
 from consumos.models import Consumo
-from consumos.services import PedidoRechazado, anular_consumo, registrar_pedido
+from consumos.services import PedidoRechazado, anular_consumo
+from consumos.services import registrar_pedido as _registrar_pedido
 from menus import services as menu
 from menus.escenario_prueba import crear_escenario, nuevo_token
 from menus.models import MovimientoPorcion, ReservaPorcion
 
 from .models import FolioDiario, Pedido
 from .services import cambiar_plato
+
+
+def registrar_pedido(*args, **kwargs):
+    """La mesa es obligatoria: en estas pruebas un pedido sin mesa es de Despacho,
+    salvo que la prueba pase `mesa_id` (o `despacho`) explícitamente."""
+    if "mesa_id" not in kwargs:
+        kwargs.setdefault("despacho", True)
+    return _registrar_pedido(*args, **kwargs)
 
 
 def chuleta_con(e, acomp):
@@ -150,7 +159,7 @@ class RegistrarPedidoTests(TestCase):
 
         pedido = resultado.pedido
         self.assertTrue(resultado.creado)
-        self.assertEqual((pedido.folio, pedido.estado, pedido.mesa_nombre), (1, "pendiente", "Sin mesa"))
+        self.assertEqual((pedido.folio, pedido.estado, pedido.mesa_nombre), (1, "pendiente", "Despacho"))
         self.assertEqual(pedido.consumo.local, self.e.local)
         self.assertEqual([str(i) for i in pedido.items.all()], ["Chuleta de cerdo + Arroz", "Naranja"])
         self.e.chuleta.refresh_from_db(); self.e.arroz.refresh_from_db(); self.e.naranja.refresh_from_db()
@@ -367,7 +376,9 @@ class EscanerConMenuTests(TestCase):
         self.client.force_login(self.e.garzon_a)
 
     def escanear(self, **campos):
-        return self.client.post(reverse("consumos:escaner"), campos, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+        # El escáner envía siempre su modo; aquí, Despacho salvo que la prueba diga otra cosa.
+        datos = {"despacho": "1", **campos}
+        return self.client.post(reverse("consumos:escaner"), datos, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
 
     def qr(self):
         return {"token": str(self.e.trabajador.token_qr)}
@@ -375,7 +386,7 @@ class EscanerConMenuTests(TestCase):
     def confirmar(self, token, seleccion, **campos):
         return self.client.post(
             reverse("consumos:confirmar"),
-            {**(campos or self.qr()), "selection_token": token, "seleccion": json.dumps(seleccion)},
+            {"despacho": "1", **(campos or self.qr()), "selection_token": token, "seleccion": json.dumps(seleccion)},
         )
 
     def test_escanear_abre_la_hoja_sin_registrar_nada(self):
@@ -393,7 +404,7 @@ class EscanerConMenuTests(TestCase):
 
         datos = self.confirmar(token, [chuleta_con(self.e, self.e.arroz)]).json()
 
-        self.assertEqual((datos["status"], datos["folio"], datos["message"]), ("registered", "0001", "Pedido 0001 · Sin mesa"))
+        self.assertEqual((datos["status"], datos["folio"], datos["message"]), ("registered", "0001", "Pedido 0001 · Despacho"))
         self.assertEqual(datos["items"], ["Chuleta de cerdo + Arroz"])
         self.assertEqual(Pedido.objects.get().consumo.metodo, Consumo.METODO_QR)
         # Reintento de red con la misma selección: mismo pedido, sin crear otro.
@@ -564,9 +575,21 @@ class MesaEnPedidoTests(TestCase):
         pedido.refresh_from_db()
         self.assertEqual(pedido.mesa_nombre, "Mesa 3")
 
-    def test_sin_mesa(self):
-        pedido = self.pedir(None).pedido
-        self.assertEqual((pedido.mesa, pedido.mesa_nombre), (None, "Sin mesa"))
+    def test_sin_mesa_solo_si_es_despacho(self):
+        with self.assertRaises(PedidoRechazado) as error:
+            self.pedir(None)
+        self.assertEqual(error.exception.codigo, "mesa_obligatoria")
+        self.assertFalse(Consumo.objects.exists())
+
+        pedido = registrar_pedido(
+            self.e.trabajador.pk, self.e.garzon_a, nuevo_token(), [{"plato": self.e.pollo.pk}], despacho=True
+        ).pedido
+        self.assertEqual((pedido.mesa, pedido.mesa_nombre), (None, "Despacho"))
+
+    def test_la_regla_aplica_tambien_al_administrador(self):
+        with self.assertRaises(PedidoRechazado) as error:
+            _registrar_pedido(self.e.trabajador.pk, self.e.admin, nuevo_token(), [{"plato": self.e.pollo.pk}])
+        self.assertEqual(error.exception.codigo, "mesa_obligatoria")
 
     def test_mesa_inactiva_o_de_otro_local_se_rechaza_sin_crear_nada(self):
         self.mesa.activa = False
@@ -592,8 +615,41 @@ class EscanerModoMesaTests(TestCase):
         self.ajena = Mesa.objects.create(local=Local.objects.create(nombre="Otro", direccion="X"), nombre="Mesa 1")
         self.client.force_login(self.e.garzon_a)
 
-    def escanear(self, contenido):
-        return self.client.post(reverse("consumos:escaner"), {"token": contenido}, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+    def escanear(self, contenido, **modo):
+        return self.client.post(
+            reverse("consumos:escaner"), {"token": contenido, **modo}, HTTP_X_REQUESTED_WITH="XMLHttpRequest"
+        )
+
+    def test_comensal_sin_mesa_ni_despacho_no_abre_la_hoja(self):
+        for campos in ({"token": str(self.e.trabajador.token_qr)}, {"trabajador_id": str(self.e.trabajador.pk)}):
+            respuesta = self.client.post(reverse("consumos:escaner"), campos, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+            self.assertEqual(respuesta.status_code, 409)
+            self.assertEqual(
+                (respuesta.json()["status"], respuesta.json()["message"]),
+                ("sin_modo", "Primero escanea la mesa o elige Despacho."),
+            )
+        self.assertFalse(ReservaPorcion.objects.exists())
+
+    def test_confirmar_sin_mesa_ni_despacho_se_rechaza(self):
+        respuesta = self.client.post(reverse("consumos:confirmar"), {
+            "token": str(self.e.trabajador.token_qr), "selection_token": str(nuevo_token()),
+            "seleccion": json.dumps([{"plato": self.e.pollo.pk}]),
+        })
+        self.assertEqual((respuesta.status_code, respuesta.json()["code"]), (409, "mesa_obligatoria"))
+        self.assertFalse(Pedido.objects.exists())
+
+    def test_despacho_por_rut(self):
+        datos = self.escanear("", trabajador_id=str(self.e.trabajador.pk), despacho="1").json()
+        respuesta = self.client.post(reverse("consumos:confirmar"), {
+            "trabajador_id": str(self.e.trabajador.pk), "despacho": "1", "selection_token": datos["selection_token"],
+            "seleccion": json.dumps([{"plato": self.e.pollo.pk}]),
+        }).json()
+        self.assertEqual(respuesta["message"], "Pedido 0001 · Despacho")
+        self.assertEqual(Pedido.objects.get().consumo.metodo, Consumo.METODO_RUT)
+
+    def test_escanear_comensal_con_mesa_inactiva_no_abre_la_hoja(self):
+        respuesta = self.escanear(str(self.e.trabajador.token_qr), mesa_id=self.inactiva.pk)
+        self.assertEqual((respuesta.status_code, respuesta.json()["code"]), (409, "mesa_invalida"))
 
     def test_escanear_mesa_activa_el_modo_mesa(self):
         datos = self.escanear(self.mesa.token).json()
@@ -613,7 +669,7 @@ class EscanerModoMesaTests(TestCase):
         self.assertEqual((respuesta.status_code, respuesta.json()["message"]), (400, "QR no válido."))
 
     def test_confirmar_guarda_la_mesa_activa_y_el_resultado_la_muestra(self):
-        datos = self.escanear(str(self.e.trabajador.token_qr)).json()
+        datos = self.escanear(str(self.e.trabajador.token_qr), mesa_id=self.mesa.pk).json()
         respuesta = self.client.post(reverse("consumos:confirmar"), {
             "token": str(self.e.trabajador.token_qr), "selection_token": datos["selection_token"],
             "seleccion": json.dumps([{"plato": self.e.pollo.pk}]), "mesa_id": self.mesa.pk,
@@ -623,7 +679,7 @@ class EscanerModoMesaTests(TestCase):
         self.assertEqual(Pedido.objects.get().mesa, self.mesa)
 
     def test_confirmar_con_mesa_desactivada_entre_medio_no_crea_nada(self):
-        datos = self.escanear(str(self.e.trabajador.token_qr)).json()
+        datos = self.escanear(str(self.e.trabajador.token_qr), mesa_id=self.mesa.pk).json()
         self.mesa.activa = False
         self.mesa.save()
         respuesta = self.client.post(reverse("consumos:confirmar"), {
@@ -668,7 +724,7 @@ class HistorialConPedidoTests(TestCase):
             self.client.force_login(usuario)
             historial = self.client.get(reverse("consumos:historial"))
             self.assertContains(historial, "0001</span> · Mesa 3")
-            self.assertContains(historial, "0002</span> · Sin mesa")
+            self.assertContains(historial, "0002</span> · Despacho")
 
     def test_consumo_sin_pedido_muestra_guion(self):
         from consumos.services import registrar_consumo_diario

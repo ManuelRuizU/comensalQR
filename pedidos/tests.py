@@ -651,3 +651,32 @@ class EscanerModoMesaTests(TestCase):
         self.e.menu.publicado = False
         self.e.menu.save()
         self.assertNotContains(self.client.get(reverse("consumos:escaner")), 'id="mesa-activa"')
+
+
+class HistorialConPedidoTests(TestCase):
+    def setUp(self):
+        from mesas.models import Mesa
+
+        self.e = crear_escenario()
+        self.mesa = Mesa.objects.create(local=self.e.local, nombre="Mesa 3")
+
+    def test_historial_muestra_folio_y_mesa(self):
+        registrar_pedido(self.e.trabajador.pk, self.e.garzon_a, nuevo_token(), [{"plato": self.e.pollo.pk}], mesa_id=self.mesa.pk)
+        registrar_pedido(self.e.otro.pk, self.e.garzon_a, nuevo_token(), [{"plato": self.e.pollo.pk}])
+
+        for usuario in (self.e.admin, self.e.garzon_a):  # el garzón ve el día en curso
+            self.client.force_login(usuario)
+            historial = self.client.get(reverse("consumos:historial"))
+            self.assertContains(historial, "0001</span> · Mesa 3")
+            self.assertContains(historial, "0002</span> · Sin mesa")
+
+    def test_consumo_sin_pedido_muestra_guion(self):
+        from consumos.services import registrar_consumo_diario
+
+        self.e.menu.publicado = False
+        self.e.menu.save()
+        registrar_consumo_diario(self.e.trabajador.pk, self.e.garzon_a)
+        self.client.force_login(self.e.admin)
+
+        historial = self.client.get(reverse("consumos:historial"))
+        self.assertContains(historial, '<span class="text-secondary">—</span>')

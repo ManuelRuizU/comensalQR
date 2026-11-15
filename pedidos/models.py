@@ -1,3 +1,5 @@
+import secrets
+
 from django.db import models
 
 from consumos.models import Consumo
@@ -7,6 +9,10 @@ from menus.models import Acompanamiento, PlatoDia
 
 # Pedidos anteriores a la mesa obligatoria; los nuevos sin mesa son siempre «Despacho».
 SIN_MESA = "Sin mesa"
+
+
+def nuevo_token_etiqueta():
+    return secrets.token_urlsafe(32)
 # Colaciones que se envían a las empresas: única forma de confirmar un pedido sin mesa.
 DESPACHO = "Despacho"
 
@@ -34,7 +40,12 @@ class Pedido(models.Model):
         help_text="Mesa activa en el escáner al confirmar. Vacío = sin mesa / para llevar.",
     )
     # Copia del nombre al confirmar: renombrar o desactivar la mesa no altera el historial.
-    mesa_nombre = models.CharField(max_length=30, default=SIN_MESA)
+    mesa_nombre = models.CharField(max_length=60, default=SIN_MESA)
+    # Pedido de despacho: colación que se envía a la empresa (sin mesa, solo administrador).
+    es_despacho = models.BooleanField(default=False)
+    # Token de la etiqueta del envase. Distinto del QR del trabajador, que nunca se imprime
+    # en etiquetas, guías ni hojas de reparto.
+    token_etiqueta = models.CharField(max_length=43, unique=True, default=nuevo_token_etiqueta, editable=False)
     clave_idempotencia = models.UUIDField(unique=True)
     estado = models.CharField(max_length=10, choices=ESTADOS, default=PENDIENTE)
     creado = models.DateTimeField(auto_now_add=True)

@@ -595,6 +595,8 @@ class MesaEnPedidoTests(TestCase):
         ).pedido
         self.assertIsNone(pedido.mesa)
         self.assertIsNone(pedido.consumo.mesa)
+        self.assertTrue(pedido.es_despacho)
+        self.assertEqual(pedido.mesa_nombre, "Despacho · Constructora ABC")
 
     def test_la_regla_aplica_tambien_al_administrador(self):
         with self.assertRaises(PedidoRechazado) as error:
@@ -758,3 +760,53 @@ class HistorialConPedidoTests(TestCase):
 
         historial = self.client.get(reverse("consumos:historial"))
         self.assertContains(historial, '<span class="text-secondary">—</span>')
+
+
+class EtiquetaYConfiguracionDespachoTests(TestCase):
+    def setUp(self):
+        self.e = crear_escenario(cupo=2)
+
+    def test_token_de_etiqueta_unico_y_distinto_del_qr_del_trabajador(self):
+        a = registrar_pedido(self.e.trabajador.pk, self.e.garzon_a, nuevo_token(), [{"plato": self.e.pollo.pk}]).pedido
+        b = registrar_pedido(self.e.trabajador.pk, self.e.garzon_a, nuevo_token(), [{"plato": self.e.pollo.pk}]).pedido
+
+        self.assertEqual(len(a.token_etiqueta), 43)
+        self.assertNotEqual(a.token_etiqueta, b.token_etiqueta)
+        self.assertNotIn(str(self.e.trabajador.token_qr), (a.token_etiqueta, b.token_etiqueta))
+        self.assertFalse(a.es_despacho)
+
+    def test_migracion_rellena_un_token_distinto_por_pedido(self):
+        from importlib import import_module
+
+        from django.apps import apps
+
+        for _ in range(2):
+            registrar_pedido(self.e.trabajador.pk, self.e.garzon_a, nuevo_token(), [{"plato": self.e.pollo.pk}])
+        antes = set(Pedido.objects.values_list("token_etiqueta", flat=True))
+        migracion = import_module("pedidos.migrations.0003_despacho_y_etiqueta")
+        migracion.rellenar_tokens(apps, None)  # solo rellena los vacíos: no cambia los existentes
+
+        self.assertEqual(set(Pedido.objects.values_list("token_etiqueta", flat=True)), antes)
+        self.assertEqual(len(antes), 2)
+
+    def test_configuracion_de_cierre_y_envase(self):
+        import datetime
+
+        self.assertEqual(self.e.local.hora_cierre_despacho, datetime.time(10, 0))
+        empresa = self.e.trabajador.empresa
+        self.assertIsNone(empresa.hora_cierre_despacho)
+        self.assertEqual(empresa.tipo_envase, "individual")
+
+        self.client.force_login(self.e.admin)
+        self.client.post(reverse("empresas:editar", args=[empresa.pk]), {
+            "rut": empresa.rut, "nombre": empresa.nombre, "direccion": empresa.direccion,
+            "encargado_personal": empresa.encargado_personal, "almuerzos_diarios": 2,
+            "hora_cierre_despacho": "09:30", "tipo_envase": "marmita", "activa": "on",
+        })
+        self.client.post(reverse("locales:editar", args=[self.e.local.pk]), {
+            "nombre": self.e.local.nombre, "direccion": self.e.local.direccion,
+            "hora_cierre_despacho": "11:15", "activo": "on",
+        })
+        empresa.refresh_from_db(); self.e.local.refresh_from_db()
+        self.assertEqual((empresa.hora_cierre_despacho, empresa.tipo_envase), (datetime.time(9, 30), "marmita"))
+        self.assertEqual(self.e.local.hora_cierre_despacho, datetime.time(11, 15))

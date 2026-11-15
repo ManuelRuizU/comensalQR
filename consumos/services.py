@@ -369,7 +369,8 @@ def registrar_pedido(
                 fecha=fecha,
                 folio=_siguiente_folio(local, fecha),
                 mesa=mesa,
-                mesa_nombre=mesa.nombre if mesa else DESPACHO,
+                mesa_nombre=mesa.nombre if mesa else f"{DESPACHO} · {trabajador.empresa.nombre}"[:60],
+                es_despacho=despacho,
                 clave_idempotencia=token,
             )
             items = []

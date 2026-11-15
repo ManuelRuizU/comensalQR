@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Despacho | ComensalQR{% endblock %}
+{% block content %}
+<div class="cq-heading">
+    <div>
+        <div class="cq-eyebrow">Envíos a empresas</div><h1>Despacho</h1>
+        <p class="cq-subtitle">Lista nominal que envía la empresa. El trabajador no pasa por el escáner: se cobra lo confirmado, coma o no.</p>
+    </div>
+</div>
+
+<form method="get" class="cq-card p-3 mb-4 d-flex flex-wrap gap-2 align-items-end">
+    <div><label class="form-label" for="sel-empresa">Empresa</label>
+        <select class="form-select" id="sel-empresa" name="empresa" required><option value="">Elige la empresa</option>{% for e in empresas %}<option value="{{ e.pk }}" {% if e == empresa %}selected{% endif %}>{{ e.nombre }}</option>{% endfor %}</select></div>
+    <div><label class="form-label" for="sel-fecha">Fecha</label><input class="form-control" id="sel-fecha" type="date" name="fecha" value="{{ fecha|date:'Y-m-d' }}"></div>
+    <button class="btn btn-outline-primary" type="submit">Ver lista</button>
+</form>
+
+{% if not local %}
+    <div class="cq-banner cq-banner-warning">Tu usuario no tiene local asignado: asígnalo en Administradores para registrar despachos.</div>
+{% elif empresa %}
+    {% if not menu %}
+        <div class="cq-banner cq-banner-warning">No hay menú publicado para el {{ fecha|date:"d/m/Y" }} en {{ local }}: carga y publica el menú antes de registrar el despacho.</div>
+    {% elif abierta %}
+        <div class="cq-banner cq-banner-success">Lista abierta hasta las <strong>{{ hora_cierre|time:"H:i" }}</strong> del {{ fecha|date:"d/m/Y" }}{% if empresa.hora_cierre_despacho %} (hora propia de {{ empresa }}){% endif %}. Después queda fija.</div>
+    {% else %}
+        <div class="cq-banner cq-banner-danger">Lista cerrada a las <strong>{{ hora_cierre|time:"H:i" }}</strong>: ya no se puede agregar ni cambiar. Para quitar un pedido, anúlalo con motivo en <a href="{% url 'pedidos:lista' %}?fecha={{ fecha|date:'Y-m-d' }}">Pedidos del día</a>.</div>
+    {% endif %}
+
+    {% if totales %}
+    <div class="cq-card p-3 mb-4">
+        <h2 class="h5">Registrados: {{ registrados }} · totales por plato</h2>
+        <ul class="mb-0">{% for nombre, cantidad in totales %}<li><strong>{{ cantidad }}</strong> × {{ nombre }}</li>{% endfor %}</ul>
+    </div>
+    {% endif %}
+
+    {% if menu %}
+    <form method="post" action="{% url 'despacho:confirmar' %}" id="form-despacho" class="cq-card p-3">{% csrf_token %}
+        <input type="hidden" name="empresa" value="{{ empresa.pk }}"><input type="hidden" name="fecha" value="{{ fecha|date:'Y-m-d' }}"><input type="hidden" name="lista" id="lista-json">
+        <div class="cq-table-wrap"><table class="table cq-table">
+            <thead><tr><th>Almuerza</th><th>Trabajador</th><th>Colación</th><th>Pedido</th></tr></thead>
+            <tbody id="filas-despacho"></tbody>
+        </table></div>
+        <p id="despacho-aviso" class="cq-sheet-error" role="alert" hidden></p>
+        {% if abierta %}<div class="cq-form-actions"><button class="btn btn-primary" type="submit" id="btn-confirmar-lista">Confirmar lista</button></div>{% endif %}
+    </form>
+    {% endif %}
+{% endif %}
+
+<dialog id="dlg-colacion" class="cq-sheet cq-pedido" aria-labelledby="colacion-nombre">
+    <div class="cq-sheet-head"><div><h2 id="colacion-nombre"></h2><div class="cq-pedido-detalle">{{ empresa }} · Despacho {{ fecha|date:"d/m/Y" }}</div></div><button type="button" class="cq-sheet-close" data-cerrar aria-label="Cerrar">×</button></div>
+    <div id="colacion-tiempos" class="cq-pedido-tiempos"></div>
+    <div class="cq-pedido-acciones"><button type="button" class="btn btn-outline-secondary" data-cerrar>Cancelar</button><button type="button" class="btn btn-success" id="colacion-listo" disabled>Listo</button></div>
+</dialog>
+{% if datos %}{{ datos|json_script:"datos-despacho" }}{% endif %}
+{% endblock %}
+
+{% block extra_scripts %}{% if menu %}
+<script src="{% static 'js/hoja_pedido.js' %}?v={{ static_version }}"></script>
+<script>
+(function () {
+    const datos = JSON.parse(document.getElementById("datos-despacho").textContent);
+    const ABIERTA = {{ abierta|yesno:"true,false" }};
+    const tbody = document.getElementById("filas-despacho");
+    const aviso = document.getElementById("despacho-aviso");
+    const dlg = document.getElementById("dlg-colacion");
+    const contenedor = document.getElementById("colacion-tiempos");
+    const btnListo = document.getElementById("colacion-listo");
+    let menu = datos.menu;
+    let etag = null;
+
+    // Estado por trabajador: marcado, selección actual y (si ya tiene pedido) la original.
+    const filas = datos.filas.map((f) => {
+        const seleccion = {};
+        if (f.pedido) f.pedido.items.forEach((i) => { seleccion[i.tiempo] = { plato: i.plato, acompanamiento: i.acompanamiento }; });
+        return { ...f, marcado: Boolean(f.pedido), seleccion, original: JSON.stringify(seleccion) };
+    });
+
+    const el = (tag, clase, texto) => { const n = document.createElement(tag); if (clase) n.className = clase; if (texto !== undefined) n.textContent = texto; return n; };
+    const editable = (fila) => ABIERTA && (!fila.pedido || fila.pedido.estado === "pendiente");
+
+    // En un pedido ya registrado solo se cambia el plato de sus tiempos (cambio de plato).
+    function menuPara(fila) {
+        if (!fila.pedido) return menu;
+        const tiempos = new Set(fila.pedido.items.map((i) => i.tiempo));
+        return { ...menu, tiempos: menu.tiempos.filter((t) => tiempos.has(t.id)) };
+    }
+
+    function pintarFilas() {
+        tbody.replaceChildren();
+        filas.forEach((fila) => {
+            const tr = el("tr");
+            const casilla = el("input"); casilla.type = "checkbox"; casilla.checked = fila.marcado;
+            casilla.disabled = !ABIERTA || (fila.pedido && fila.pedido.estado !== "pendiente");
+            casilla.setAttribute("aria-label", `${fila.nombre} almuerza`);
+            casilla.addEventListener("change", () => { fila.marcado = casilla.checked; pintarFilas(); });
+            const tdCasilla = el("td"); tdCasilla.append(casilla);
+            const tdNombre = el("td"); tdNombre.append(el("div", "fw-semibold", fila.nombre), el("div", "small text-secondary", fila.rut));
+            const tdColacion = el("td");
+            const resumen = HojaPedido.resumen(menu, fila.seleccion);
+            tdColacion.append(el("div", resumen ? "" : "text-secondary", resumen || (fila.marcado ? "Falta elegir" : "—")));
+            if (fila.marcado && editable(fila)) {
+                const boton = el("button", "btn btn-sm btn-outline-primary mt-1", fila.pedido ? "Cambiar plato" : (resumen ? "Cambiar" : "Elegir colación"));
+                boton.type = "button";
+                boton.addEventListener("click", () => abrir(fila));
+                tdColacion.append(boton);
+            }
+            const tdPedido = el("td");
+            if (fila.pedido) tdPedido.append(el("span", "fw-semibold", fila.pedido.folio), el("div", "small text-secondary", fila.marcado ? fila.pedido.estado : "se anulará al confirmar"));
+            tr.append(tdCasilla, tdNombre, tdColacion, tdPedido);
+            tbody.append(tr);
+        });
+        const boton = document.getElementById("btn-confirmar-lista");
+        if (boton) boton.textContent = `Confirmar lista (${filas.filter((f) => f.marcado).length})`;
+    }
+
+    // --- Selector de colación: mismos componentes que la hoja del escáner, sin reservas ---
+    let actual = null;
+    let borrador = {};
+    function pintarHoja() {
+        const visible = menuPara(actual);
+        HojaPedido.pintar(contenedor, visible, borrador, {
+            alTocarPlato: (tiempo, plato) => {
+                const elegido = borrador[tiempo.id];
+                if (elegido && elegido.plato === plato.id) {
+                    if (!tiempo.obligatorio && !actual.pedido) delete borrador[tiempo.id];
+                } else {
+                    const libres = plato.acompanamientos.filter(HojaPedido.libre);
+                    borrador[tiempo.id] = { plato: plato.id, acompanamiento: libres.length === 1 ? libres[0].id : null };
+                }
+                pintarHoja();
+            },
+            alTocarAcomp: (tiempo, plato, acomp) => { borrador[tiempo.id] = { plato: plato.id, acompanamiento: acomp.id }; pintarHoja(); },
+        });
+        btnListo.disabled = !HojaPedido.seleccionLista(visible, borrador);
+    }
+    function abrir(fila) {
+        actual = fila;
+        borrador = JSON.parse(JSON.stringify(fila.seleccion));
+        document.getElementById("colacion-nombre").textContent = fila.nombre;
+        pintarHoja();
+        dlg.showModal();
+    }
+    btnListo.addEventListener("click", () => { actual.seleccion = borrador; dlg.close(); pintarFilas(); });
+    dlg.querySelectorAll("[data-cerrar]").forEach((b) => b.addEventListener("click", () => dlg.close()));
+
+    // --- Confirmar: nuevos, cambios de plato y quitados ---
+    const form = document.getElementById("form-despacho");
+    if (form) form.addEventListener("submit", (event) => {
+        const nuevos = [], cambios = [], quitar = [], incompletos = [];
+        filas.forEach((fila) => {
+            if (!fila.pedido && fila.marcado) {
+                if (!HojaPedido.seleccionLista(menu, fila.seleccion)) { incompletos.push(fila.nombre); return; }
+                nuevos.push({ trabajador: fila.id, token: fila.token, seleccion: Object.values(fila.seleccion) });
+            } else if (fila.pedido && !fila.marcado) {
+                quitar.push(fila.pedido.id);
+            } else if (fila.pedido && JSON.stringify(fila.seleccion) !== fila.original) {
+                fila.pedido.items.forEach((item) => {
+                    const nuevo = fila.seleccion[item.tiempo];
+                    if (nuevo && (nuevo.plato !== item.plato || nuevo.acompanamiento !== item.acompanamiento)) {
+                        cambios.push({ item: item.id, plato: nuevo.plato, acompanamiento: nuevo.acompanamiento });
+                    }
+                });
+            }
+        });
+        if (incompletos.length) {
+            event.preventDefault();
+            aviso.textContent = `Falta elegir la colación de: ${incompletos.join(", ")}.`;
+            aviso.hidden = false;
+            return;
+        }
+        if (quitar.length && !window.confirm(`Se quitarán ${quitar.length} trabajador(es) de la lista: sus pedidos se anulan y no se cobran. ¿Continuar?`)) {
+            event.preventDefault();
+            return;
+        }
+        document.getElementById("lista-json").value = JSON.stringify({ nuevos, cambios, quitar });
+    });
+
+    // --- Disponibilidad en vivo (cada 3 s, con ETag) ---
+    async function refrescar() {
+        try {
+            const r = await fetch(datos.url_disponibilidad, { headers: etag ? { "If-None-Match": etag } : {} });
+            if (r.status !== 200) return;
+            etag = r.headers.get("ETag");
+            menu = await r.json();
+            pintarFilas();
+            if (dlg.open) pintarHoja();
+        } catch (e) { /* sin conexión: se reintenta en el siguiente ciclo */ }
+    }
+    pintarFilas();
+    if (ABIERTA) window.setInterval(() => { if (document.visibilityState === "visible") refrescar(); }, 3000);
+})();
+</script>
+{% endif %}{% endblock %}

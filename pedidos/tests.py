@@ -935,3 +935,72 @@ def _rut_valido(cuerpo):
         factor = 2 if factor == 7 else factor + 1
     resto = 11 - (suma % 11)
     return f"{cuerpo}-{'0' if resto == 11 else 'K' if resto == 10 else resto}"
+
+
+class PantallaDespachoTests(TestCase):
+    def setUp(self):
+        self.e = crear_escenario()
+        self.empresa = self.e.trabajador.empresa
+        self.client.force_login(self.e.admin)
+        self.hoy = timezone.localdate()
+        self.url = reverse("despacho:lista") + f"?empresa={self.empresa.pk}&fecha={self.hoy:%Y-%m-%d}"
+
+    def a_las(self, hora, minuto=0):
+        import datetime
+
+        momento = timezone.make_aware(datetime.datetime.combine(self.hoy, datetime.time(hora, minuto)))
+        return patch("django.utils.timezone.now", return_value=momento)
+
+    def enviar(self, **lista):
+        return self.client.post(
+            reverse("despacho:confirmar"),
+            {"empresa": self.empresa.pk, "fecha": self.hoy.isoformat(), "lista": json.dumps(lista)},
+            follow=True,
+        )
+
+    def test_pantalla_lista_a_los_trabajadores_activos_con_el_menu(self):
+        with self.a_las(8):
+            pantalla = self.client.get(self.url)
+        self.assertContains(pantalla, "Lista abierta hasta las <strong>10:00</strong>")
+        nombres = [f["nombre"] for f in pantalla.context["datos"]["filas"]]
+        self.assertEqual(sorted(nombres), ["Ana Soto", "Javier Cid"])
+        self.assertEqual(pantalla.context["datos"]["menu"]["menu_id"], self.e.menu.pk)
+
+    def test_confirmar_crea_informa_fallidos_cambia_y_quita(self):
+        with self.a_las(8):
+            registrar_pedido(self.e.otro.pk, self.e.garzon_a, nuevo_token(), [{"plato": self.e.pollo.pk}])  # Ana ya almorzó
+            respuesta = self.enviar(nuevos=[
+                {"trabajador": self.e.trabajador.pk, "token": str(nuevo_token()), "seleccion": [chuleta_con(self.e, self.e.pure)]},
+                {"trabajador": self.e.otro.pk, "token": str(nuevo_token()), "seleccion": [{"plato": self.e.pollo.pk}]},
+            ])
+        textos = [str(m) for m in respuesta.context["messages"]]
+        self.assertIn("1 pedido(s) registrado(s).", textos)
+        self.assertTrue(any(t.startswith("No se registró a Ana Soto: Cupo diario agotado") for t in textos))
+
+        pedido = Pedido.objects.get(es_despacho=True)
+        with self.a_las(9):
+            self.enviar(cambios=[{"item": pedido.items.get().pk, "plato": self.e.chuleta.pk, "acompanamiento": self.e.arroz.pk}])
+            pedido.refresh_from_db()
+            self.assertEqual(str(pedido.items.get()), "Chuleta de cerdo + Arroz")
+            self.enviar(quitar=[pedido.pk])
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.estado, Pedido.ANULADO)
+
+    def test_despues_del_cierre_la_pantalla_queda_fija(self):
+        with self.a_las(10, 1):
+            pantalla = self.client.get(self.url)
+            respuesta = self.enviar(nuevos=[{"trabajador": self.e.trabajador.pk, "token": str(nuevo_token()), "seleccion": [{"plato": self.e.pollo.pk}]}])
+        self.assertContains(pantalla, "Lista cerrada a las <strong>10:00</strong>")
+        self.assertNotContains(pantalla, 'id="btn-confirmar-lista"')
+        self.assertTrue(any("cerró a las 10:00" in str(m) for m in respuesta.context["messages"]))
+        self.assertFalse(Pedido.objects.exists())
+
+    def test_operador_no_entra_ni_confirma(self):
+        self.client.force_login(self.e.garzon_a)
+        self.assertEqual(self.client.get(self.url).status_code, 302)
+        with self.a_las(8):
+            self.client.post(reverse("despacho:confirmar"), {
+                "empresa": self.empresa.pk, "fecha": self.hoy.isoformat(),
+                "lista": json.dumps({"nuevos": [{"trabajador": self.e.trabajador.pk, "token": str(nuevo_token()), "seleccion": [{"plato": self.e.pollo.pk}]}]}),
+            })
+        self.assertFalse(Pedido.objects.exists())

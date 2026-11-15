@@ -46,7 +46,7 @@ Permitir que un restaurante registre mediante QR:
 - Informe de cierre de porciones
 - Sin menú publicado hoy, el escáner funciona como en v0.1
 
-## v0.2 — Fase 2 (en curso): Mesas
+## v0.2 — Fase 2 (terminada): Mesas
 
 - Mesas por local con QR propio (token aleatorio), crear, desactivar y
   reactivar, PDF A4 con sus QR

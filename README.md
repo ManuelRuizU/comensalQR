@@ -142,6 +142,20 @@ Especificación completa: `docs/v0.2-menu-mesas-cocina.md`.
 - **Informe de cierre**: por ítem, porciones cargadas, ajustes, servidas,
   anuladas y quedan.
 
+Mesas (v0.2, Fase 2)
+
+- **Mesas** (administrador, desde **Menú → Mesas**): crear, desactivar y
+  reactivar mesas por local, y descargar sus QR en PDF A4 (6 por hoja). El QR
+  contiene solo un token aleatorio.
+- **Modo mesa**: con menú publicado, el escáner parte en «Sin mesa». Escanear
+  el QR de una mesa la activa («MESA 3» arriba) hasta escanear otra, tocar
+  «Sin mesa» o cerrar el escáner. Cada pedido confirmado guarda la mesa
+  activa en ese momento.
+- Una mesa desactivada o de otro local se rechaza al escanearla y al
+  confirmar. Sin menú publicado, escanear una mesa solo muestra un aviso.
+- El folio y la mesa aparecen en el resultado del escaneo, en «Tus últimos
+  registros» y en la columna Pedido del historial.
+
 Pruebas de concurrencia: requieren PostgreSQL real (bloqueo de filas). Se
 omiten con `config.test_settings` (SQLite) y se ejecutan con:
 

@@ -26,6 +26,8 @@ from menus.services import (
     reservar,
     ultima_seleccion,
 )
+from mesas.models import Mesa
+from mesas.services import MesaInvalida, identificar_mesa
 from operadores.models import local_de_usuario
 from trabajadores.models import Trabajador
 
@@ -203,6 +205,42 @@ def _respuesta_cupo_agotado(trabajador, metodo, usados, cupo, hoy, status=200):
     }, status=status)
 
 
+def _es_qr_de_mesa(request):
+    """Los QR de trabajador son UUID; un QR que no lo es y coincide con una mesa es de mesa."""
+    if request.POST.get("trabajador_id", "").strip():
+        return False
+    contenido = request.POST.get("token", "").strip()
+    try:
+        uuid.UUID(contenido)
+    except ValueError:
+        return Mesa.objects.filter(token=contenido).exists()
+    return False
+
+
+def _escaneo_de_mesa(request, hoy):
+    """Escanear una mesa activa el modo mesa del escáner (solo con menú publicado)."""
+    try:
+        mesa = identificar_mesa(request.POST.get("token", ""), request.user)
+    except MesaInvalida as error:
+        return _respuesta_error(error.mensaje, hoy, code=error.codigo)
+    if menu_publicado_de_usuario(request.user, hoy) is None:
+        return JsonResponse({
+            "ok": True,
+            "status": "mesa_sin_menu",
+            "table": mesa.nombre,
+            "message": f"{mesa.nombre}: hoy no hay menú publicado; los almuerzos se registran sin pedido ni mesa.",
+            "today_total": _total_hoy(hoy),
+        })
+    return JsonResponse({
+        "ok": True,
+        "status": "mesa",
+        "table_id": mesa.pk,
+        "table": mesa.nombre,
+        "message": f"{mesa.nombre}: escanea a cada comensal.",
+        "today_total": _total_hoy(hoy),
+    })
+
+
 @user_passes_test(operador_o_administrador, login_url="login")
 def escaner(request):
     hoy = timezone.localdate()
@@ -218,6 +256,9 @@ def escaner(request):
                 "con_menu": menu_publicado_de_usuario(request.user, hoy) is not None,
             },
         )
+
+    if _es_qr_de_mesa(request):
+        return _escaneo_de_mesa(request, hoy)
 
     trabajador, metodo, error = _identificar_trabajador(request)
     if error:
@@ -342,7 +383,10 @@ def confirmar_pedido(request):
         return _respuesta_error("Selección no válida.", hoy, code="seleccion_incompleta")
 
     try:
-        resultado = registrar_pedido(trabajador.pk, request.user, token, seleccion, metodo=metodo, fecha=hoy)
+        resultado = registrar_pedido(
+            trabajador.pk, request.user, token, seleccion, metodo=metodo, fecha=hoy,
+            mesa_id=request.POST.get("mesa_id") or None,
+        )
     except PedidoRechazado as rechazo:
         if rechazo.codigo == "cupo_agotado":
             return _respuesta_cupo_agotado(trabajador, metodo, rechazo.usados, rechazo.cupo, hoy, status=409)

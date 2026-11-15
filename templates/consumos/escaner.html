@@ -7,6 +7,7 @@
 <div class="cq-scan-app">
     <header class="cq-scan-top">
         <span class="cq-scan-brand">ComensalQR</span>
+        {% if con_menu %}<button type="button" class="cq-scan-mesa" id="mesa-activa" title="Toca para pasar a «Sin mesa»">Sin mesa</button>{% endif %}
         <span class="cq-scan-count">Hoy: <strong id="total-hoy">{{ total_hoy }}</strong></span>
         <details class="cq-scan-menu">
             <summary aria-label="Menú">
@@ -36,6 +37,10 @@
             <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M9 2h6l-1 6h3l-6 14v-9H8z" fill="currentColor"/></svg>
             <span>Linterna</span>
         </button>
+        {% if con_menu %}<button id="btn-sin-mesa" type="button" hidden>
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="4" y="9" width="16" height="3" rx="1" fill="currentColor"/><path d="M7 12v7M17 12v7M3 3l18 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <span>Sin mesa</span>
+        </button>{% endif %}
         <button id="btn-manual" type="button">
             <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 10h1M11 10h1M15 10h1M7 14h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
             <span>Manual (RUT)</span>
@@ -191,9 +196,10 @@
 
     function showScanResult(data) {
         window.clearTimeout(resultTimerId);
-        const tipo = data.status === "registered" ? "success" : data.status === "duplicate" ? "warning" : "danger";
+        const tipo = ["registered", "mesa"].includes(data.status) ? "success" : ["duplicate", "mesa_sin_menu"].includes(data.status) ? "warning" : "danger";
         let titulo = { success: "Registrado", warning: "Cupo agotado", danger: "No válido" }[tipo];
         if (tipo === "success" && data.folio) titulo = `Pedido ${data.folio} · ${data.table}`;
+        if (data.status === "mesa" || data.status === "mesa_sin_menu") titulo = data.table;
         const icono = { success: "✓", warning: "!", danger: "✕" }[tipo];
 
         resultPanel.replaceChildren();
@@ -235,7 +241,7 @@
         ultimos.forEach((item) => {
             const fila = elemento("li", "cq-sheet-item");
             const texto = elemento("div");
-            texto.append(elemento("strong", "", item.worker), elemento("span", "", `${item.company} · ${item.folio ? `pedido ${item.folio}` : `almuerzo ${item.number}`}${item.manual ? " · manual" : ""}`));
+            texto.append(elemento("strong", "", item.worker), elemento("span", "", `${item.company} · ${item.folio ? `pedido ${item.folio} · ${item.table}` : `almuerzo ${item.number}`}${item.manual ? " · manual" : ""}`));
             fila.append(texto, elemento("span", "cq-sheet-time", item.time));
             listaUltimos.append(fila);
         });
@@ -244,7 +250,7 @@
     function actualizarContadores(data) {
         if (typeof data.today_total === "number") totalHoy.textContent = data.today_total;
         if (data.status === "registered") {
-            ultimos.unshift({ worker: data.worker, company: data.company, time: data.time, number: data.number, manual: data.manual, folio: data.folio });
+            ultimos.unshift({ worker: data.worker, company: data.company, time: data.time, number: data.number, manual: data.manual, folio: data.folio, table: data.table });
             ultimos = ultimos.slice(0, 5);
             pintarUltimos();
         }
@@ -281,6 +287,7 @@
         } finally {
             requestInProgress = false;
         }
+        if (result.status === "mesa") activarMesa({ id: result.table_id, nombre: result.table });
         if (result.status === "seleccion") {
             // Hay menú publicado: el almuerzo se registra al confirmar el pedido.
             statusText.textContent = "Elige los platos";
@@ -405,6 +412,25 @@
             resultadosRut.append(boton);
         });
     });
+
+    // --- Modo mesa -------------------------------------------------------------------
+    // Dura hasta escanear otra mesa, elegir «Sin mesa» o cerrar el escáner (vive solo en esta pantalla).
+    let mesaActiva = null;
+    const indicadorMesa = document.getElementById("mesa-activa");
+    const btnSinMesa = document.getElementById("btn-sin-mesa");
+    function activarMesa(mesa) {
+        mesaActiva = mesa;
+        if (indicadorMesa) {
+            indicadorMesa.textContent = mesa ? mesa.nombre.toUpperCase() : "Sin mesa";
+            indicadorMesa.classList.toggle("is-active", Boolean(mesa));
+        }
+        if (btnSinMesa) btnSinMesa.hidden = !mesa;
+    }
+    [indicadorMesa, btnSinMesa].forEach((boton) => boton && boton.addEventListener("click", () => {
+        if (!mesaActiva) return;
+        activarMesa(null);
+        window.cqShowToast("Sin mesa: los próximos pedidos van para llevar o sin mesa.", "info");
+    }));
 
     // --- Hoja de pedido (menú del día publicado) -----------------------------------
     // Cada opción tocada reserva 1 porción por 90 s. La garantía real está al confirmar:
@@ -567,7 +593,7 @@
         hoja = { campos, token: data.selection_token, menu: data.menu, previous: data.previous || [], seleccion: {}, ocupado: false, etag: null };
         document.getElementById("pedido-nombre").textContent = data.worker;
         document.getElementById("pedido-detalle").textContent =
-            `${data.company} · Almuerzo ${data.used + 1} de ${data.quota}${data.manual ? " · manual" : ""}`;
+            `${data.company} · Almuerzo ${data.used + 1} de ${data.quota} · ${mesaActiva ? mesaActiva.nombre : "Sin mesa"}${data.manual ? " · manual" : ""}`;
         errorHoja("");
         pintarHoja();
         dlgPedido.showModal();
@@ -616,6 +642,7 @@
         try {
             response = await postForm(URL_CONFIRMAR, {
                 ...hoja.campos, selection_token: hoja.token, seleccion: JSON.stringify(seleccion),
+                mesa_id: mesaActiva ? mesaActiva.id : "",
             });
             data = await leerJson(response);
         } catch (error) {
@@ -631,6 +658,15 @@
             cerrarHoja({ liberarReservas: false });
             showScanResult(data);
             actualizarContadores(data);
+            return;
+        }
+        if (data.code === "mesa_invalida") {
+            // La mesa se desactivó mientras tanto: se pasa a «Sin mesa» y el garzón decide.
+            hoja.ocupado = false;
+            activarMesa(null);
+            errorHoja(`${data.message} Se cambió a «Sin mesa»: confirma de nuevo o cancela.`);
+            renovarReservas();
+            actualizarConfirmar();
             return;
         }
         if (["porcion_agotada", "seleccion_incompleta", "reservada_por_otro"].includes(data.code)) {

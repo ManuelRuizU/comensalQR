@@ -579,3 +579,75 @@ class MesaEnPedidoTests(TestCase):
         self.assertFalse(FolioDiario.objects.exists())
         self.e.pollo.refresh_from_db()
         self.assertEqual(self.e.pollo.vendidas, 0)
+
+
+class EscanerModoMesaTests(TestCase):
+    def setUp(self):
+        from locales.models import Local
+        from mesas.models import Mesa
+
+        self.e = crear_escenario()
+        self.mesa = Mesa.objects.create(local=self.e.local, nombre="Mesa 3")
+        self.inactiva = Mesa.objects.create(local=self.e.local, nombre="Mesa 4", activa=False)
+        self.ajena = Mesa.objects.create(local=Local.objects.create(nombre="Otro", direccion="X"), nombre="Mesa 1")
+        self.client.force_login(self.e.garzon_a)
+
+    def escanear(self, contenido):
+        return self.client.post(reverse("consumos:escaner"), {"token": contenido}, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+
+    def test_escanear_mesa_activa_el_modo_mesa(self):
+        datos = self.escanear(self.mesa.token).json()
+
+        self.assertEqual((datos["status"], datos["table_id"], datos["table"]), ("mesa", self.mesa.pk, "Mesa 3"))
+        self.assertFalse(Consumo.objects.exists())
+
+    def test_qr_de_mesa_inactiva_o_de_otro_local_es_rechazado(self):
+        for mesa, motivo in ((self.inactiva, "desactivada"), (self.ajena, "no pertenece a tu local")):
+            respuesta = self.escanear(mesa.token)
+            self.assertEqual(respuesta.status_code, 400)
+            self.assertEqual(respuesta.json()["code"], "mesa_invalida")
+            self.assertIn(motivo, respuesta.json()["message"])
+
+    def test_qr_que_no_es_trabajador_ni_mesa_sigue_siendo_invalido(self):
+        respuesta = self.escanear("cualquier-cosa")
+        self.assertEqual((respuesta.status_code, respuesta.json()["message"]), (400, "QR no válido."))
+
+    def test_confirmar_guarda_la_mesa_activa_y_el_resultado_la_muestra(self):
+        datos = self.escanear(str(self.e.trabajador.token_qr)).json()
+        respuesta = self.client.post(reverse("consumos:confirmar"), {
+            "token": str(self.e.trabajador.token_qr), "selection_token": datos["selection_token"],
+            "seleccion": json.dumps([{"plato": self.e.pollo.pk}]), "mesa_id": self.mesa.pk,
+        }).json()
+
+        self.assertEqual(respuesta["message"], "Pedido 0001 · Mesa 3")
+        self.assertEqual(Pedido.objects.get().mesa, self.mesa)
+
+    def test_confirmar_con_mesa_desactivada_entre_medio_no_crea_nada(self):
+        datos = self.escanear(str(self.e.trabajador.token_qr)).json()
+        self.mesa.activa = False
+        self.mesa.save()
+        respuesta = self.client.post(reverse("consumos:confirmar"), {
+            "token": str(self.e.trabajador.token_qr), "selection_token": datos["selection_token"],
+            "seleccion": json.dumps([{"plato": self.e.pollo.pk}]), "mesa_id": self.mesa.pk,
+        })
+
+        self.assertEqual((respuesta.status_code, respuesta.json()["code"]), (409, "mesa_invalida"))
+        self.assertFalse(Pedido.objects.exists())
+
+    def test_mesa_sin_menu_publicado_solo_avisa(self):
+        self.e.menu.publicado = False
+        self.e.menu.save()
+
+        datos = self.escanear(self.mesa.token).json()
+
+        self.assertEqual(datos["status"], "mesa_sin_menu")
+        self.assertIn("hoy no hay menú publicado", datos["message"])
+        # El escáner sigue como v0.1: un trabajador se registra directo, sin pedido.
+        self.assertEqual(self.escanear(str(self.e.trabajador.token_qr)).json()["status"], "registered")
+        self.assertFalse(Pedido.objects.exists())
+
+    def test_pantalla_muestra_el_indicador_de_mesa_solo_con_menu(self):
+        self.assertContains(self.client.get(reverse("consumos:escaner")), 'id="mesa-activa"')
+        self.e.menu.publicado = False
+        self.e.menu.save()
+        self.assertNotContains(self.client.get(reverse("consumos:escaner")), 'id="mesa-activa"')

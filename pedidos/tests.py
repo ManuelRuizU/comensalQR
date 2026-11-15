@@ -1004,3 +1004,95 @@ class PantallaDespachoTests(TestCase):
                 "lista": json.dumps({"nuevos": [{"trabajador": self.e.trabajador.pk, "token": str(nuevo_token()), "seleccion": [{"plato": self.e.pollo.pk}]}]}),
             })
         self.assertFalse(Pedido.objects.exists())
+
+
+class DocumentosDespachoTests(TestCase):
+    def setUp(self):
+        import datetime
+
+        from trabajadores.models import Trabajador
+
+        self.e = crear_escenario()
+        self.empresa = self.e.trabajador.empresa
+        self.e.local.hora_cierre_despacho = datetime.time(23, 59, 59)
+        self.e.local.save()
+        self.e.pollo.porciones = None
+        self.e.pollo.save()
+        self.tercero = Trabajador.objects.create(nombre="Luis", apellido="Rojas", rut="33333333-3", empresa=self.empresa)
+        self.hoy = timezone.localdate()
+        filas = [
+            {"trabajador": self.e.trabajador, "token": nuevo_token(), "seleccion": [{"plato": self.e.pollo.pk}, {"plato": self.e.naranja.pk}]},
+            {"trabajador": self.e.otro, "token": nuevo_token(), "seleccion": [{"plato": self.e.pollo.pk}]},
+            {"trabajador": self.tercero, "token": nuevo_token(), "seleccion": [chuleta_con(self.e, self.e.arroz)]},
+        ]
+        self.resultado = despacho.confirmar_lista(self.e.admin, self.empresa, self.hoy, filas)
+        self.client.force_login(self.e.admin)
+        self.params = {"empresa": self.empresa.pk, "fecha": self.hoy.isoformat()}
+
+    def etiquetas(self):
+        from . import documentos
+
+        with patch.object(documentos, "qr_svg", wraps=documentos.qr_svg) as qr:
+            pagina = self.client.get(reverse("despacho:etiquetas"), self.params)
+        return pagina, [llamada.args[0] for llamada in qr.call_args_list]
+
+    def test_etiquetas_individuales_una_por_pedido_con_su_token(self):
+        pagina, contenidos = self.etiquetas()
+
+        tokens = {p.token_etiqueta for p in self.resultado.creados}
+        self.assertEqual(set(contenidos), tokens)
+        self.assertEqual(len(pagina.context["etiquetas"]), 3)
+        self.assertContains(pagina, "Javier Cid")
+        self.assertContains(pagina, "Pollo asado")
+        self.assertContains(pagina, "Folio 0001")
+
+    def test_nunca_se_imprime_el_qr_del_trabajador(self):
+        from trabajadores.models import Trabajador
+
+        qr_trabajadores = {str(t) for t in Trabajador.objects.values_list("token_qr", flat=True)}
+        for tipo in ("individual", "marmita"):
+            self.empresa.tipo_envase = tipo
+            self.empresa.save()
+            pagina, contenidos = self.etiquetas()
+            self.assertFalse(qr_trabajadores & set(contenidos), tipo)
+            for token in qr_trabajadores:
+                self.assertNotContains(pagina, token)
+        guia = self.client.get(reverse("despacho:guia"), self.params)
+        for token in qr_trabajadores:
+            self.assertNotContains(guia, token)
+
+    def test_marmita_una_por_plato_con_cantidad_y_hoja_de_reparto(self):
+        self.empresa.tipo_envase = "marmita"
+        self.empresa.save()
+
+        pagina, contenidos = self.etiquetas()
+        marmitas = {m["nombre"]: m for m in pagina.context["marmitas"]}
+
+        self.assertEqual({n: m["cantidad"] for n, m in marmitas.items()}, {"Pollo asado": 2, "Naranja": 1, "Chuleta de cerdo + Arroz": 1})
+        self.assertEqual(marmitas["Pollo asado"]["trabajadores"], ["Ana Soto", "Javier Cid"])
+        self.assertContains(pagina, "Pollo asado × 2")
+        self.assertContains(pagina, "Hoja de reparto")
+        # Reimprimir conserva los mismos tokens de marmita.
+        _, otra_vez = self.etiquetas()
+        self.assertEqual(set(contenidos), set(otra_vez))
+
+    def test_la_guia_cuadra_con_los_pedidos(self):
+        anulado = self.resultado.creados[1]
+        anular_consumo(anulado.consumo_id, self.e.admin, "No viene hoy")
+
+        guia = self.client.get(reverse("despacho:guia"), self.params)
+        vigentes = despacho.pedidos_de_despacho(self.empresa, self.e.local, self.hoy)
+
+        filas = guia.context["filas"]
+        self.assertEqual([(f["nombre"], f["folio"]) for f in filas], [(str(p.consumo.trabajador), p.folio_texto) for p in vigentes])
+        self.assertEqual(guia.context["total"], 2)
+        totales = dict(guia.context["totales"])
+        self.assertEqual(totales, {"Pollo asado": 1, "Naranja": 1, "Chuleta de cerdo + Arroz": 1})
+        self.assertEqual(sum(totales.values()), sum(len(f["lineas"]) for f in filas))
+        self.assertNotContains(guia, "Ana Soto")
+        self.assertContains(guia, "Firma")
+
+    def test_solo_el_administrador(self):
+        self.client.force_login(self.e.garzon_a)
+        for vista in ("despacho:etiquetas", "despacho:guia"):
+            self.assertEqual(self.client.get(reverse(vista), self.params).status_code, 302)

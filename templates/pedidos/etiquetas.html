@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Etiquetas {{ empresa }} | ComensalQR{% endblock %}
+{% block body_class %}cq-imprimible{% endblock %}
+{% block content %}
+<div class="cq-heading cq-no-imprimir">
+    <div><div class="cq-eyebrow">Despacho {{ fecha|date:"d/m/Y" }}</div><h1>Etiquetas {{ empresa }}</h1>
+        <p class="cq-subtitle">{% if marmita %}Envase marmita: una etiqueta por plato, más la hoja de reparto con los nombres.{% else %}Envase individual: una etiqueta por pedido.{% endif %} {{ total }} pedido(s). Pega la etiqueta en una parte fría del envase.</p></div>
+    <div class="cq-actions"><button class="btn btn-primary" type="button" onclick="window.print()">Imprimir</button><a class="btn btn-outline-secondary" href="{{ volver }}">Volver al despacho</a></div>
+</div>
+
+{% if not total %}
+    <div class="cq-banner cq-banner-warning cq-no-imprimir">No hay pedidos de despacho registrados para {{ empresa }} el {{ fecha|date:"d/m/Y" }}.</div>
+{% elif marmita %}
+    <div class="cq-etiquetas">
+        {% for m in marmitas %}
+        <article class="cq-etiqueta">
+            <div class="cq-etiqueta-texto">
+                <div class="cq-etiqueta-titulo">{{ m.nombre }} × {{ m.cantidad }}</div>
+                <div>{{ m.empresa }}</div>
+                <div class="cq-etiqueta-pie">{{ fecha|date:"d/m/Y" }} · {{ local }}</div>
+            </div>
+            <div class="cq-etiqueta-qr">{{ m.qr }}</div>
+        </article>
+        {% endfor %}
+    </div>
+    <section class="cq-hoja-reparto">
+        <h2>Hoja de reparto · {{ empresa }} · {{ fecha|date:"d/m/Y" }}</h2>
+        {% for m in marmitas %}
+            <h3>{{ m.nombre }} × {{ m.cantidad }}</h3>
+            <ol>{% for nombre in m.trabajadores %}<li>{{ nombre }}</li>{% endfor %}</ol>
+        {% endfor %}
+    </section>
+{% else %}
+    <div class="cq-etiquetas">
+        {% for e in etiquetas %}
+        <article class="cq-etiqueta">
+            <div class="cq-etiqueta-texto">
+                <div class="cq-etiqueta-titulo">{{ e.nombre }}</div>
+                <div>{{ e.empresa }}</div>
+                <ul>{% for linea in e.lineas %}<li>{{ linea }}</li>{% endfor %}</ul>
+                <div class="cq-etiqueta-pie">Folio {{ e.folio }} · {{ fecha|date:"d/m/Y" }}</div>
+            </div>
+            <div class="cq-etiqueta-qr">{{ e.qr }}</div>
+        </article>
+        {% endfor %}
+    </div>
+{% endif %}
+{% endblock %}

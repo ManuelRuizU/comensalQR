@@ -103,3 +103,34 @@ class FolioDiario(models.Model):
         unique_together = [("local", "fecha")]
         verbose_name = "Folio diario"
         verbose_name_plural = "Folios diarios"
+
+
+class EtiquetaMarmita(models.Model):
+    """Etiqueta de una marmita de despacho: un plato (y acompañamiento) de una empresa en un día.
+
+    La cantidad se calcula de los pedidos vigentes; aquí solo vive su token (el QR que se
+    escanea al verificar el despacho), distinto del QR de cualquier trabajador.
+    """
+
+    local = models.ForeignKey(Local, on_delete=models.PROTECT, related_name="etiquetas_marmita")
+    empresa = models.ForeignKey("empresas.Empresa", on_delete=models.PROTECT, related_name="etiquetas_marmita")
+    fecha = models.DateField()
+    plato = models.ForeignKey(PlatoDia, on_delete=models.PROTECT, related_name="etiquetas_marmita")
+    acompanamiento = models.ForeignKey(
+        Acompanamiento, on_delete=models.PROTECT, null=True, blank=True, related_name="etiquetas_marmita"
+    )
+    token = models.CharField(max_length=43, unique=True, default=nuevo_token_etiqueta, editable=False)
+
+    class Meta:
+        verbose_name = "Etiqueta de marmita"
+        verbose_name_plural = "Etiquetas de marmita"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["empresa", "fecha", "plato", "acompanamiento"],
+                nulls_distinct=False,
+                name="una_etiqueta_por_marmita",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.plato} + {self.acompanamiento}" if self.acompanamiento_id else str(self.plato)

@@ -15,7 +15,7 @@ from menus.services import disponibilidad, menu_publicado
 from operadores.models import local_de_usuario
 from trabajadores.models import Trabajador
 
-from . import despacho
+from . import despacho, documentos
 from .services import cambiar_plato
 
 
@@ -131,3 +131,27 @@ def confirmar(request):
     if not (partes or resultado.errores or errores_cambio):
         messages.info(request, "No había cambios que guardar.")
     return redirect(_url_lista(empresa, fecha))
+
+
+def _documento(request, plantilla, construir):
+    local = local_de_usuario(request.user)
+    empresa = get_object_or_404(Empresa, pk=request.GET.get("empresa"))
+    fecha = _fecha(request.GET.get("fecha"))
+    if local is None:
+        messages.error(request, "Tu usuario no tiene local asignado.")
+        return redirect(_url_lista(empresa, fecha))
+    contexto = {"empresa": empresa, "fecha": fecha, "local": local, "volver": _url_lista(empresa, fecha)}
+    contexto.update(construir(empresa, local, fecha))
+    return render(request, plantilla, contexto)
+
+
+@user_passes_test(es_administrador, login_url="login")
+def etiquetas(request):
+    """Etiquetas de la empresa: una por pedido (individual) o una por plato (marmita) + hoja de reparto."""
+    return _documento(request, "pedidos/etiquetas.html", documentos.datos_etiquetas)
+
+
+@user_passes_test(es_administrador, login_url="login")
+def guia(request):
+    """Guía de despacho: lista nominal, totales por plato y firma de quien recibe."""
+    return _documento(request, "pedidos/guia.html", documentos.datos_guia)

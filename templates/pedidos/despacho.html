@@ -29,7 +29,13 @@
 
     {% if totales %}
     <div class="cq-card p-3 mb-4">
-        <h2 class="h5">Registrados: {{ registrados }} · totales por plato</h2>
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+            <h2 class="h5 mb-0">Registrados: {{ registrados }} · totales por plato</h2>
+            <div class="d-flex flex-wrap gap-2">
+                <a class="btn btn-primary" href="{% url 'despacho:etiquetas' %}?empresa={{ empresa.pk }}&amp;fecha={{ fecha|date:'Y-m-d' }}">Imprimir etiquetas {{ empresa }}</a>
+                <a class="btn btn-outline-primary" href="{% url 'despacho:guia' %}?empresa={{ empresa.pk }}&amp;fecha={{ fecha|date:'Y-m-d' }}">Guía de despacho</a>
+            </div>
+        </div>
         <ul class="mb-0">{% for nombre, cantidad in totales %}<li><strong>{{ cantidad }}</strong> × {{ nombre }}</li>{% endfor %}</ul>
     </div>
     {% endif %}

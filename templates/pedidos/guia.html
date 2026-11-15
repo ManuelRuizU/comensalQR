@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Guía de despacho {{ empresa }} | ComensalQR{% endblock %}
+{% block body_class %}cq-imprimible{% endblock %}
+{% block content %}
+<div class="cq-actions cq-no-imprimir mb-3"><button class="btn btn-primary" type="button" onclick="window.print()">Imprimir</button><a class="btn btn-outline-secondary" href="{{ volver }}">Volver al despacho</a></div>
+<article class="cq-guia">
+    <header>
+        <h1>Guía de despacho</h1>
+        <p><strong>{{ local }}</strong> → <strong>{{ empresa }}</strong> · {{ fecha|date:"l d/m/Y" }} · {{ total }} colación(es)</p>
+    </header>
+    <table class="table table-sm">
+        <thead><tr><th>#</th><th>Trabajador</th><th>RUT</th><th>Colación</th><th>Folio</th></tr></thead>
+        <tbody>{% for f in filas %}<tr><td>{{ forloop.counter }}</td><td>{{ f.nombre }}</td><td>{{ f.rut }}</td><td>{{ f.lineas|join:" · " }}</td><td>{{ f.folio }}</td></tr>{% empty %}<tr><td colspan="5">Sin pedidos de despacho registrados.</td></tr>{% endfor %}</tbody>
+    </table>
+    <h2>Totales por plato</h2>
+    <table class="table table-sm cq-guia-totales">
+        <tbody>{% for nombre, cantidad in totales %}<tr><td>{{ nombre }}</td><td class="text-end fw-semibold">{{ cantidad }}</td></tr>{% endfor %}</tbody>
+    </table>
+    <div class="cq-firma">
+        <div><span></span>Nombre de quien recibe</div>
+        <div><span></span>Firma</div>
+        <div><span></span>Hora de entrega</div>
+    </div>
+</article>
+{% endblock %}

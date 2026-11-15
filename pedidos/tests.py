@@ -703,7 +703,10 @@ class EscanerModoMesaTests(TestCase):
         self.assertFalse(Pedido.objects.exists())
 
     def test_pantalla_muestra_el_indicador_de_mesa_solo_con_menu(self):
-        self.assertContains(self.client.get(reverse("consumos:escaner")), 'id="mesa-activa"')
+        pantalla = self.client.get(reverse("consumos:escaner"))
+        self.assertContains(pantalla, "Escanea la mesa")
+        self.assertContains(pantalla, 'id="btn-despacho"')
+        self.assertNotContains(pantalla, "Sin mesa")
         self.e.menu.publicado = False
         self.e.menu.save()
         self.assertNotContains(self.client.get(reverse("consumos:escaner")), 'id="mesa-activa"')

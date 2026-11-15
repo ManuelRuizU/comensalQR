@@ -898,3 +898,4 @@ td:not(.text-end) .cq-item-panel { right: auto; left: 0; }
 /* Modo mesa del escáner */
 .cq-scan-mesa { border: 0; border-radius: 999px; padding: 0.3rem 0.9rem; background: rgba(255, 255, 255, 0.12); color: #fff; font-weight: 800; font-size: 0.95rem; letter-spacing: .02em; }
 .cq-scan-mesa.is-active { background: #1fbf7a; color: #062d1d; font-size: 1.15rem; }
+.cq-scan-mesa.is-pendiente { background: #f5a524; color: #3a2400; }

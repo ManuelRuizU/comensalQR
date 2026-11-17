@@ -591,9 +591,13 @@ class MesaEnPedidoTests(TestCase):
             self.assertEqual(error.exception.codigo, "despacho_no_permitido")
         self.assertFalse(Consumo.objects.exists())
 
-        pedido = _registrar_pedido(
-            self.e.trabajador.pk, self.e.admin, nuevo_token(), [{"plato": self.e.pollo.pk}], despacho=True
-        ).pedido
+        import datetime
+
+        antes_del_cierre = timezone.make_aware(datetime.datetime.combine(timezone.localdate(), datetime.time(8, 0)))
+        with patch("django.utils.timezone.now", return_value=antes_del_cierre):  # no depende del reloj real
+            pedido = _registrar_pedido(
+                self.e.trabajador.pk, self.e.admin, nuevo_token(), [{"plato": self.e.pollo.pk}], despacho=True
+            ).pedido
         self.assertIsNone(pedido.mesa)
         self.assertIsNone(pedido.consumo.mesa)
         self.assertTrue(pedido.es_despacho)
@@ -1025,7 +1029,9 @@ class DocumentosDespachoTests(TestCase):
             {"trabajador": self.e.otro, "token": nuevo_token(), "seleccion": [{"plato": self.e.pollo.pk}]},
             {"trabajador": self.tercero, "token": nuevo_token(), "seleccion": [chuleta_con(self.e, self.e.arroz)]},
         ]
-        self.resultado = despacho.confirmar_lista(self.e.admin, self.empresa, self.hoy, filas)
+        a_las_8 = timezone.make_aware(datetime.datetime.combine(self.hoy, datetime.time(8, 0)))
+        with patch("django.utils.timezone.now", return_value=a_las_8):  # no depende del reloj real
+            self.resultado = despacho.confirmar_lista(self.e.admin, self.empresa, self.hoy, filas)
         self.client.force_login(self.e.admin)
         self.params = {"empresa": self.empresa.pk, "fecha": self.hoy.isoformat()}
 
@@ -1096,3 +1102,99 @@ class DocumentosDespachoTests(TestCase):
         self.client.force_login(self.e.garzon_a)
         for vista in ("despacho:etiquetas", "despacho:guia"):
             self.assertEqual(self.client.get(reverse(vista), self.params).status_code, 302)
+
+
+class VerificarDespachoTests(TestCase):
+    def setUp(self):
+        import datetime
+
+        from trabajadores.models import Trabajador
+
+        self.e = crear_escenario()
+        self.empresa = self.e.trabajador.empresa
+        self.e.local.hora_cierre_despacho = datetime.time(23, 59, 59)
+        self.e.local.save()
+        self.e.pollo.porciones = None
+        self.e.pollo.save()
+        for i in range(28):
+            Trabajador.objects.create(nombre=f"T{i:02d}", apellido="Despacho", rut=_rut_valido(31000000 + i), empresa=self.empresa)
+        self.hoy = timezone.localdate()
+        filas = [
+            {"trabajador": t, "token": nuevo_token(), "seleccion": [{"plato": self.e.pollo.pk}]}
+            for t in self.empresa.trabajadores.filter(eliminado_en__isnull=True)
+        ]
+        a_las_8 = timezone.make_aware(datetime.datetime.combine(self.hoy, datetime.time(8, 0)))
+        with patch("django.utils.timezone.now", return_value=a_las_8):  # no depende del reloj real
+            self.pedidos = despacho.confirmar_lista(self.e.admin, self.empresa, self.hoy, filas).creados
+        self.client.force_login(self.e.admin)
+
+    def leer(self, token, empresa=None, fecha=None):
+        return self.client.post(reverse("despacho:verificar_lectura"), {
+            "empresa": (empresa or self.empresa).pk, "fecha": (fecha or self.hoy).isoformat(), "token": token,
+        }).json()
+
+    def test_llega_a_30_de_30_solo_con_las_30_correctas_y_detecta_duplicados(self):
+        from empresas.models import Empresa
+
+        self.assertEqual(len(self.pedidos), 30)
+        for pedido in self.pedidos[:29]:
+            self.assertEqual(self.leer(pedido.token_etiqueta)["status"], "ok")
+
+        duplicada = self.leer(self.pedidos[0].token_etiqueta)
+        self.assertEqual((duplicada["status"], duplicada["progress"]["verified"]), ("duplicada", 29))
+        # Ajenas: QR de un trabajador, etiqueta de otra empresa y de otro día no cuentan.
+        otra = Empresa.objects.create(nombre="Otra SpA", rut="76333333-7", direccion="d", encargado_personal="e")
+        from trabajadores.models import Trabajador
+
+        ajeno = Trabajador.objects.create(nombre="Pía", apellido="Lagos", rut="44444444-4", empresa=otra)
+        pedido_ajeno = despacho.confirmar_lista(
+            self.e.admin, otra, self.hoy, [{"trabajador": ajeno, "token": nuevo_token(), "seleccion": [{"plato": self.e.pollo.pk}]}]
+        ).creados[0]
+        for token, motivo in (
+            (str(self.e.trabajador.token_qr), "No es una etiqueta de despacho"),
+            (pedido_ajeno.token_etiqueta, "otra empresa"),
+        ):
+            respuesta = self.leer(token)
+            self.assertEqual(respuesta["status"], "rechazada")
+            self.assertIn(motivo, respuesta["message"])
+        manana = self.hoy + timezone.timedelta(days=1)
+        self.assertIn("otro día", self.leer(self.pedidos[29].token_etiqueta, fecha=manana)["message"])
+
+        progreso = self.leer(self.pedidos[0].token_etiqueta)["progress"]
+        self.assertEqual((progreso["verified"], progreso["total"], progreso["ready"]), (29, 30, False))
+        self.assertEqual(progreso["missing"], [str(self.pedidos[29].consumo.trabajador)])
+
+        final = self.leer(self.pedidos[29].token_etiqueta)
+        self.assertEqual((final["progress"]["verified"], final["progress"]["total"], final["progress"]["ready"]), (30, 30, True))
+
+    def test_guarda_quien_y_cuando_y_no_toca_pedidos_ni_consumos(self):
+        from .models import VerificacionEtiqueta
+
+        antes = list(Pedido.objects.order_by("pk").values_list("estado", "mesa_nombre", "consumo__anulado"))
+        consumos = Consumo.objects.count()
+        self.leer(self.pedidos[0].token_etiqueta)
+
+        verificacion = VerificacionEtiqueta.objects.get()
+        self.assertEqual((verificacion.pedido, verificacion.verificado_por), (self.pedidos[0], self.e.admin))
+        self.assertIsNotNone(verificacion.verificado_en)
+        self.assertEqual(list(Pedido.objects.order_by("pk").values_list("estado", "mesa_nombre", "consumo__anulado")), antes)
+        self.assertEqual(Consumo.objects.count(), consumos)
+
+    def test_marmitas_se_verifican_por_envase(self):
+        self.empresa.tipo_envase = "marmita"
+        self.empresa.save()
+        pagina = self.client.get(reverse("despacho:etiquetas"), {"empresa": self.empresa.pk, "fecha": self.hoy.isoformat()})
+        marmita = pagina.context["marmitas"][0]
+
+        self.assertEqual(self.leer(self.pedidos[0].token_etiqueta)["status"], "rechazada")  # etiqueta individual
+        final = self.leer(marmita["token"])
+        self.assertEqual((final["status"], final["progress"]["verified"], final["progress"]["total"]), ("ok", 1, 1))
+        self.assertTrue(final["progress"]["ready"])
+
+    def test_pantalla_y_lectura_solo_para_el_administrador(self):
+        url = reverse("despacho:verificar") + f"?empresa={self.empresa.pk}"
+        self.assertContains(self.client.get(url), "0 / 30")
+        self.client.force_login(self.e.garzon_a)
+        self.assertEqual(self.client.get(url).status_code, 302)
+        respuesta = self.client.post(reverse("despacho:verificar_lectura"), {"empresa": self.empresa.pk, "token": self.pedidos[0].token_etiqueta})
+        self.assertEqual(respuesta.status_code, 302)

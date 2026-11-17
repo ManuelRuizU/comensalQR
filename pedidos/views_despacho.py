@@ -3,6 +3,7 @@ import uuid
 
 from django.contrib import messages
 from django.contrib.auth.decorators import user_passes_test
+from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -15,7 +16,7 @@ from menus.services import disponibilidad, menu_publicado
 from operadores.models import local_de_usuario
 from trabajadores.models import Trabajador
 
-from . import despacho, documentos
+from . import despacho, documentos, verificacion
 from .services import cambiar_plato
 
 
@@ -155,3 +156,37 @@ def etiquetas(request):
 def guia(request):
     """Guía de despacho: lista nominal, totales por plato y firma de quien recibe."""
     return _documento(request, "pedidos/guia.html", documentos.datos_guia)
+
+
+@user_passes_test(es_administrador, login_url="login")
+def verificar(request):
+    """Modo «Verificar despacho»: elige empresa y escanea las etiquetas antes de despachar."""
+    local = local_de_usuario(request.user)
+    empresas = Empresa.objects.filter(activa=True)
+    empresa = empresas.filter(pk=int(request.GET["empresa"])).first() if request.GET.get("empresa", "").isdigit() else None
+    fecha = _fecha(request.GET.get("fecha"))
+    contexto = {"empresas": empresas, "empresa": empresa, "fecha": fecha, "local": local}
+    if empresa and local:
+        contexto["progreso"] = verificacion.progreso(empresa, local, fecha)
+    return render(request, "pedidos/verificar.html", contexto)
+
+
+def _progreso_json(progreso):
+    return {"verified": progreso.verificados, "total": progreso.total, "missing": progreso.faltantes, "ready": progreso.listo}
+
+
+@user_passes_test(es_administrador, login_url="login")
+@require_POST
+def verificar_lectura(request):
+    local = local_de_usuario(request.user)
+    empresa = get_object_or_404(Empresa, pk=request.POST.get("empresa"))
+    fecha = _fecha(request.POST.get("fecha"))
+    if local is None:
+        return JsonResponse({"ok": False, "status": "rechazada", "message": "Tu usuario no tiene local asignado."}, status=400)
+    lectura = verificacion.verificar(request.user, empresa, local, fecha, request.POST.get("token"))
+    return JsonResponse({
+        "ok": lectura.estado == verificacion.OK,
+        "status": lectura.estado,
+        "message": lectura.mensaje,
+        "progress": _progreso_json(lectura.progreso),
+    })

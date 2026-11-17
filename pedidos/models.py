@@ -1,5 +1,6 @@
 import secrets
 
+from django.conf import settings
 from django.db import models
 
 from consumos.models import Consumo
@@ -134,3 +135,32 @@ class EtiquetaMarmita(models.Model):
 
     def __str__(self):
         return f"{self.plato} + {self.acompanamiento}" if self.acompanamiento_id else str(self.plato)
+
+
+class VerificacionEtiqueta(models.Model):
+    """Control antes de despachar: quién escaneó cada etiqueta y a qué hora.
+
+    Solo registra la verificación; no crea ni modifica consumos ni pedidos.
+    """
+
+    empresa = models.ForeignKey("empresas.Empresa", on_delete=models.PROTECT, related_name="verificaciones")
+    fecha = models.DateField()
+    pedido = models.OneToOneField(Pedido, on_delete=models.PROTECT, null=True, blank=True, related_name="verificacion")
+    marmita = models.OneToOneField(
+        EtiquetaMarmita, on_delete=models.PROTECT, null=True, blank=True, related_name="verificacion"
+    )
+    verificado_por = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    verificado_en = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "Verificación de etiqueta"
+        verbose_name_plural = "Verificaciones de etiquetas"
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(pedido__isnull=False, marmita__isnull=True)
+                    | models.Q(pedido__isnull=True, marmita__isnull=False)
+                ),
+                name="verificacion_de_una_etiqueta",
+            )
+        ]

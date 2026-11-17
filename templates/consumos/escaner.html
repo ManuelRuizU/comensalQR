@@ -16,7 +16,7 @@
             <div class="cq-scan-menu-list">
                 <span class="cq-scan-menu-user">{{ request.user.get_full_name|default:request.user.get_username }}{% if local %} · {{ local }}{% endif %}</span>
                 <a href="{% url 'consumos:historial' %}">{% if request.user.is_staff %}Historial{% else %}Consumos de hoy{% endif %}</a>
-                {% if request.user.is_staff %}<a href="{% url 'consumos:dashboard' %}">Dashboard</a>{% endif %}
+                {% if request.user.is_staff %}<a href="{% url 'consumos:dashboard' %}">Dashboard</a><a href="{% url 'despacho:verificar' %}">Verificar despacho</a>{% endif %}
                 <button id="cq-install-pwa" type="button" hidden>Instalar app</button>
                 <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Salir</button></form>
             </div>

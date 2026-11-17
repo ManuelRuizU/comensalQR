@@ -150,13 +150,18 @@ Mesas (v0.2, Fase 2)
 - **Mesa obligatoria en el local**: el escáner arranca en «Escanea la mesa».
   Si no hay mesa activa no se toma ningún pedido ni se registra ningún
   almuerzo, con o sin menú, por QR o por RUT. Escanear el QR de una mesa la
-  activa («MESA 3» arriba) hasta escanear otra o cerrar el escáner. El pedido
-  y el consumo guardan la mesa. Un local sin mesas activas no puede registrar
-  almuerzos.
+  activa («MESA 3» arriba). Hay una sola mesa activa: dura hasta escanear otra
+  (cambio automático) o tocar «Salir de la mesa». Se recuerda durante la
+  sesión de trabajo del navegador (recargas, ir al historial y volver), pero
+  abrir la app de nuevo o cerrar sesión parte sin mesa. Al volver al escáner,
+  la mesa recordada se revalida con el servidor: si se desactivó o es de otro
+  local, se descarta y vuelve «Escanea la mesa». El pedido y el consumo
+  guardan la mesa. Un local sin mesas activas no puede registrar almuerzos.
 - Una mesa desactivada o de otro local se rechaza al escanearla y al
   confirmar.
 - El folio y la mesa aparecen en el resultado del escaneo, en «Tus últimos
-  registros» y en la columna Pedido del historial.
+  registros» y en la columna Pedido del historial, junto con los platos del
+  pedido.
 
 Despacho a empresas (solo administrador)
 
@@ -370,8 +375,12 @@ Se puede consultar desde el menú Historial, con filtros por:
 - Consumos de una empresa.
 - Consumos de un trabajador.
 - RUT: muestra todos los consumos de la persona en todas sus empresas, con el total.
+- Mesa (incluye los pedidos que guardaron la mesa solo en el pedido).
+- Garzón: lo que registró ese operador o administrador.
 
-El operador solo ve los consumos del día en curso.
+Cada fila con pedido muestra sus platos (plato + acompañamiento y los demás
+tiempos). El operador solo ve los consumos del día en curso, también con
+estos filtros; elige entre las mesas y garzones de su local.
 
 ---
 

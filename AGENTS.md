@@ -56,6 +56,10 @@ Permitir que un restaurante registre mediante QR:
 - El pedido y el consumo guardan la mesa; una mesa inactiva o de otro local se
   rechaza
 - Mesa y folio visibles en el historial y en el resultado del escaneo
+- Una sola mesa activa, recordada en sessionStorage durante la sesión de
+  trabajo y revalidada con el servidor al abrir el escáner; botón «Salir de
+  la mesa»
+- Historial con filtros por mesa y por garzón, y los platos de cada pedido
 
 ## Despacho a empresas (solo administrador)
 

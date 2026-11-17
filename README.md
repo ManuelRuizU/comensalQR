@@ -131,7 +131,7 @@ Especificación completa: `docs/v0.2-menu-mesas-cocina.md`.
 - **Escáner con menú publicado**: escanear (o buscar por RUT) no registra
   nada; abre la hoja de pedido. Cada opción tocada reserva 1 porción por 90 s.
   Al confirmar se crean juntos el consumo, el pedido y su folio diario
-  («Pedido 0042 · Sin mesa»). Si falta una porción, la hoja sigue abierta para
+  («Pedido 0042 · Mesa 3»). Si falta una porción, la hoja sigue abierta para
   elegir otra opción.
 - **Sin menú publicado** hoy en el local (o usuario sin local), el escáner
   funciona igual que en v0.1.
@@ -147,14 +147,39 @@ Mesas (v0.2, Fase 2)
 - **Mesas** (administrador, desde **Menú → Mesas**): crear, desactivar y
   reactivar mesas por local, y descargar sus QR en PDF A4 (6 por hoja). El QR
   contiene solo un token aleatorio.
-- **Modo mesa**: con menú publicado, el escáner parte en «Sin mesa». Escanear
-  el QR de una mesa la activa («MESA 3» arriba) hasta escanear otra, tocar
-  «Sin mesa» o cerrar el escáner. Cada pedido confirmado guarda la mesa
-  activa en ese momento.
+- **Mesa obligatoria en el local**: el escáner arranca en «Escanea la mesa».
+  Si no hay mesa activa no se toma ningún pedido ni se registra ningún
+  almuerzo, con o sin menú, por QR o por RUT. Escanear el QR de una mesa la
+  activa («MESA 3» arriba) hasta escanear otra o cerrar el escáner. El pedido
+  y el consumo guardan la mesa. Un local sin mesas activas no puede registrar
+  almuerzos.
 - Una mesa desactivada o de otro local se rechaza al escanearla y al
-  confirmar. Sin menú publicado, escanear una mesa solo muestra un aviso.
+  confirmar.
 - El folio y la mesa aparecen en el resultado del escaneo, en «Tus últimos
   registros» y en la columna Pedido del historial.
+
+Despacho a empresas (solo administrador)
+
+El trabajador no está presente, así que el despacho no pasa por el escáner.
+
+1. **Registrar la lista** (menú **Despacho**): empresa y fecha, casilla
+   «almuerza» y colación por trabajador, antes de la hora de cierre. Si alguno
+   no tiene cupo o porción, los demás se registran y se informa quién falló.
+2. **Cocina**: totales por plato de cada empresa (en la pantalla Despacho;
+   la pantalla de cocina llega en la Fase 3).
+3. **Imprimir etiquetas**: individuales (una por pedido) o de marmita (una por
+   plato, más la hoja de reparto). Pegar la etiqueta en una parte fría del
+   envase.
+4. **Verificar despacho**: escanear las etiquetas hasta «Listo para
+   despachar» (desde el menú del escáner o la pantalla Despacho).
+5. **Entregar** con la guía de despacho firmada por quien recibe.
+
+- **Hora de cierre**: la configura el restaurante en Locales (10:00 por
+  defecto) y cada empresa puede tener la suya en Empresas. Después del cierre
+  la lista queda fija; solo se anula con motivo en Pedidos del día.
+- **Cobro**: se cobra lo confirmado, coma o no el trabajador.
+- **Envase**: individual o marmita, por empresa.
+- Las etiquetas llevan un QR propio del pedido; nunca el QR del trabajador.
 
 Pruebas de concurrencia: requieren PostgreSQL real (bloqueo de filas). Se
 omiten con `config.test_settings` (SQLite) y se ejecutan con:

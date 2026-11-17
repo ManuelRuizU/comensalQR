@@ -50,11 +50,28 @@ Permitir que un restaurante registre mediante QR:
 
 - Mesas por local con QR propio (token aleatorio), crear, desactivar y
   reactivar, PDF A4 con sus QR
-- Modo mesa en el escáner: parte en «Sin mesa»; escanear una mesa la activa
-  hasta escanear otra, elegir «Sin mesa» o cerrar el escáner
-- El pedido guarda la mesa activa al confirmar; una mesa inactiva o de otro
-  local se rechaza
+- Mesa obligatoria en el local: el escáner (QR o RUT, con o sin menú) no
+  registra nada si no hay mesa activa («Escanea primero la mesa»). El escáner
+  es solo para atención en el local; no tiene modo despacho
+- El pedido y el consumo guardan la mesa; una mesa inactiva o de otro local se
+  rechaza
 - Mesa y folio visibles en el historial y en el resultado del escaneo
+
+## Despacho a empresas (solo administrador)
+
+Flujo en 5 pasos: 1) el administrador recibe y registra la lista nominal antes
+del cierre; 2) la cocina ve totales por plato; 3) el encargado imprime
+etiquetas; 4) el encargado verifica escaneando las etiquetas; 5) el repartidor
+entrega con la guía firmada.
+
+- registrar_pedido(despacho=True) solo desde el servicio de despacho y solo
+  con un administrador (si no, despacho_no_permitido)
+- Hora de cierre configurada por el restaurante (Local, con excepción por
+  Empresa); después del cierre solo anulación con motivo
+- Se cobra lo confirmado, coma o no el trabajador
+- Tipo de envase por empresa: individual o marmita
+- Etiquetas con token propio (Pedido.token_etiqueta / marmita); nunca imprimir
+  el QR del trabajador en etiquetas, guías ni hojas de reparto
 
 Las fases siguientes (cocina, impresión) no se implementan hasta que se
 pidan. Nada de la sección «Futuro» de la especificación.

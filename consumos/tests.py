@@ -522,3 +522,65 @@ class AnulacionConsumoTests(TestCase):
         self.assertEqual(historial.context["total_anulados"], 1)
         self.assertContains(historial, "Anulado")
         self.assertContains(historial, "Prueba de anulación")
+
+
+class RevalidarMesaTests(TestCase):
+    """El escáner guarda la mesa en sessionStorage y la revalida al volver a abrirse."""
+
+    def setUp(self):
+        from mesas.models import Mesa
+
+        self.mozo = get_user_model().objects.create_user(username="mozo-mesa", password="x")
+        Operador.objects.create(usuario=self.mozo)
+        self.mesa = dar_mesa(self.mozo)
+        otro_local = Local.objects.create(nombre="Casino Sur", direccion="Calle 2")
+        self.mesa_ajena = Mesa.objects.create(local=otro_local, nombre="Mesa Sur")
+        self.url = reverse("consumos:revalidar_mesa")
+        self.client.force_login(self.mozo)
+
+    def revalidar(self, mesa_id):
+        return self.client.post(self.url, {"mesa_id": mesa_id}, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+
+    def test_mesa_activa_del_local_se_restaura(self):
+        respuesta = self.revalidar(self.mesa.pk)
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.json()["status"], "mesa")
+        self.assertEqual(respuesta.json()["table_id"], self.mesa.pk)
+        self.assertEqual(respuesta.json()["table"], "Mesa 1")
+
+    def test_mesa_inactiva_se_descarta(self):
+        self.mesa.activa = False
+        self.mesa.save(update_fields=["activa"])
+
+        respuesta = self.revalidar(self.mesa.pk)
+
+        self.assertEqual(respuesta.status_code, 409)
+        self.assertEqual(respuesta.json()["code"], "mesa_invalida")
+        self.assertIn("desactivada", respuesta.json()["message"])
+
+    def test_mesa_de_otro_local_se_descarta(self):
+        respuesta = self.revalidar(self.mesa_ajena.pk)
+
+        self.assertEqual(respuesta.status_code, 409)
+        self.assertEqual(respuesta.json()["code"], "mesa_invalida")
+        self.assertIn("no pertenece a tu local", respuesta.json()["message"])
+
+    def test_mesa_inexistente_o_vacia(self):
+        self.assertEqual(self.revalidar(999999).json()["code"], "mesa_invalida")
+        self.assertEqual(self.revalidar("abc").json()["code"], "mesa_invalida")
+        vacia = self.revalidar("")
+        self.assertEqual(vacia.status_code, 409)
+        self.assertEqual(vacia.json()["status"], "sin_mesa")
+
+    def test_no_registra_nada(self):
+        self.revalidar(self.mesa.pk)
+
+        self.assertFalse(Consumo.objects.exists())
+
+    def test_requiere_sesion_y_post(self):
+        self.assertEqual(self.client.get(self.url).status_code, 405)
+        self.client.logout()
+        respuesta = self.revalidar(self.mesa.pk)
+        self.assertEqual(respuesta.status_code, 302)
+        self.assertIn(reverse("login"), respuesta["Location"])

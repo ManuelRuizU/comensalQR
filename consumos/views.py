@@ -337,6 +337,25 @@ def _respuesta_sin_mesa(rechazo, hoy):
     return _respuesta_error(rechazo.mensaje, hoy, status=409, code=rechazo.codigo)
 
 
+@user_passes_test(operador_o_administrador, login_url="login")
+@require_POST
+def revalidar_mesa(request):
+    """El escáner guarda la mesa activa en la sesión del navegador; al volver a abrirlo
+    pregunta aquí si sigue activa y es del local de quien escanea. No registra nada."""
+    hoy = timezone.localdate()
+    try:
+        mesa = validar_mesa(_mesa_id(request), local_de_usuario(request.user))
+    except PedidoRechazado as rechazo:
+        return _respuesta_sin_mesa(rechazo, hoy)
+    return JsonResponse({
+        "ok": True,
+        "status": "mesa",
+        "table_id": mesa.pk,
+        "table": mesa.nombre,
+        "today_total": _total_hoy(hoy),
+    })
+
+
 def _token_seleccion(request):
     try:
         return uuid.UUID(request.POST.get("selection_token", "").strip())

@@ -5,7 +5,8 @@ from django.contrib import messages
 from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.db.models import Count
+from django.contrib.auth import get_user_model
+from django.db.models import Count, Q
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -78,9 +79,11 @@ def dashboard(request):
 @user_passes_test(operador_o_administrador, login_url="login")
 def historial(request):
     es_admin = request.user.is_staff
+    # Los platos de cada pedido se traen en una sola consulta extra (no una por fila).
     consumos = Consumo.objects.select_related(
         "trabajador", "trabajador__empresa", "operador", "local", "anulado_por", "pedido", "mesa"
-    )
+    ).prefetch_related("pedido__items")
+    local_propio = local_de_usuario(request.user)
 
     if es_admin:
         fecha = parse_date(request.GET.get("fecha", "") or "")
@@ -90,6 +93,8 @@ def historial(request):
     empresa_id = request.GET.get("empresa", "")
     local_id = request.GET.get("local", "")
     trabajador_id = request.GET.get("trabajador", "") if es_admin else ""
+    mesa_id = request.GET.get("mesa", "")
+    garzon_id = request.GET.get("garzon", "")
     rut_ingresado = request.GET.get("rut", "").strip()
     rut = ""
     rut_error = None
@@ -107,6 +112,11 @@ def historial(request):
         consumos = consumos.filter(local_id=int(local_id))
     if trabajador_id.isdigit():
         consumos = consumos.filter(trabajador_id=int(trabajador_id))
+    if mesa_id.isdigit():
+        # Los pedidos anteriores a que el consumo guardara la mesa la tienen solo en el pedido.
+        consumos = consumos.filter(Q(mesa_id=int(mesa_id)) | Q(pedido__mesa_id=int(mesa_id)))
+    if garzon_id.isdigit():
+        consumos = consumos.filter(operador_id=int(garzon_id))
     if rut:
         consumos = consumos.filter(trabajador__rut=rut)
     elif rut_error:
@@ -131,6 +141,21 @@ def historial(request):
             if es_admin and empresa_id.isdigit()
             else Trabajador.objects.none()
         ),
+        # El administrador elige entre todas las mesas; el garzón, entre las de su local.
+        "mesas": (
+            Mesa.objects.select_related("local").order_by("local__nombre", "nombre")
+            if es_admin
+            else Mesa.objects.filter(local=local_propio).order_by("nombre")
+        ),
+        # Garzones y administradores (también inactivos: aparecen en registros antiguos);
+        # el garzón ve solo los de su local.
+        "garzones": get_user_model().objects.filter(
+            Q(perfil_operador__isnull=False) | Q(is_staff=True)
+            if es_admin
+            else Q(perfil_operador__local=local_propio) | Q(perfil_administrador__local=local_propio)
+        ).order_by("first_name", "last_name", "username"),
+        "mesa_seleccionada": mesa_id,
+        "garzon_seleccionado": garzon_id,
         "fecha_seleccionada": fecha,
         "empresa_seleccionada": empresa_id,
         "trabajador_seleccionado": trabajador_id,

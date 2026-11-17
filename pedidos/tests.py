@@ -766,6 +766,95 @@ class HistorialConPedidoTests(TestCase):
         historial = self.client.get(reverse("consumos:historial"))
         self.assertContains(historial, '<span class="text-secondary">—</span>')
 
+    def _dos_pedidos(self):
+        """Javier en Mesa 3 (garzón A, chuleta con puré y naranja); Ana en Mesa 1 (garzón B, pollo)."""
+        seleccion = [chuleta_con(self.e, self.e.pure), {"plato": self.e.naranja.pk}]
+        javier = registrar_pedido(self.e.trabajador.pk, self.e.garzon_a, nuevo_token(), seleccion, mesa_id=self.mesa.pk)
+        ana = registrar_pedido(self.e.otro.pk, self.e.garzon_b, nuevo_token(), [{"plato": self.e.pollo.pk}])
+        return javier.pedido.consumo, ana.pedido.consumo
+
+    def _filas(self, usuario, **filtros):
+        self.client.force_login(usuario)
+        respuesta = self.client.get(reverse("consumos:historial"), filtros)
+        return respuesta, list(respuesta.context["consumos"])
+
+    def test_filtrar_por_mesa_devuelve_solo_esa_mesa(self):
+        javier, ana = self._dos_pedidos()
+
+        for usuario in (self.e.admin, self.e.garzon_a):
+            _, filas = self._filas(usuario, mesa=self.mesa.pk)
+            self.assertEqual(filas, [javier])
+            _, filas = self._filas(usuario, mesa=self.e.mesa.pk)
+            self.assertEqual(filas, [ana])
+
+    def test_filtrar_por_mesa_incluye_pedidos_con_la_mesa_solo_en_el_pedido(self):
+        # Pedidos anteriores a que el consumo guardara la mesa: la tienen solo en el pedido.
+        javier, _ = self._dos_pedidos()
+        Consumo.objects.filter(pk=javier.pk).update(mesa=None)
+
+        _, filas = self._filas(self.e.admin, mesa=self.mesa.pk)
+
+        self.assertEqual(filas, [javier])
+
+    def test_filtrar_por_garzon_devuelve_solo_lo_que_registro(self):
+        javier, ana = self._dos_pedidos()
+
+        for usuario in (self.e.admin, self.e.garzon_a):
+            _, filas = self._filas(usuario, garzon=self.e.garzon_b.pk)
+            self.assertEqual(filas, [ana])
+            _, filas = self._filas(usuario, garzon=self.e.garzon_a.pk)
+            self.assertEqual(filas, [javier])
+
+    def test_el_garzon_sigue_viendo_solo_su_jornada(self):
+        from consumos.services import registrar_consumo_diario
+
+        ayer = timezone.localdate() - timedelta(days=1)
+        registrar_consumo_diario(self.e.trabajador.pk, self.e.garzon_a, fecha=ayer, mesa=self.mesa)
+        javier, _ = self._dos_pedidos()
+
+        _, filas = self._filas(self.e.garzon_a, mesa=self.mesa.pk, fecha=ayer.isoformat())
+        self.assertEqual(filas, [javier])
+        _, filas = self._filas(self.e.admin, mesa=self.mesa.pk, fecha=ayer.isoformat())
+        self.assertEqual(len(filas), 1)
+        self.assertEqual(filas[0].fecha, ayer)
+
+    def test_filtros_de_mesa_y_garzon_en_pantalla(self):
+        self._dos_pedidos()
+
+        respuesta, _ = self._filas(self.e.garzon_a)
+
+        self.assertContains(respuesta, 'name="mesa"')
+        self.assertContains(respuesta, 'name="garzon"')
+        self.assertContains(respuesta, ">Mesa 3</option>")
+        self.assertContains(respuesta, ">garzon.b</option>")
+
+    def test_muestra_los_platos_de_cada_pedido(self):
+        self._dos_pedidos()
+
+        respuesta, _ = self._filas(self.e.admin)
+
+        self.assertContains(respuesta, "Chuleta de cerdo + Puré · Naranja")
+        self.assertContains(respuesta, "Pollo asado</div>")
+
+    def test_platos_sin_una_consulta_por_fila(self):
+        from trabajadores.models import Trabajador
+
+        self._dos_pedidos()
+        self.client.force_login(self.e.admin)
+        base = self._consultas_historial()
+        for rut in ("33333333-3", "44444444-4", "55555555-5"):
+            t = Trabajador.objects.create(nombre="Extra", apellido=rut[:2], rut=rut, empresa=self.e.empresa)
+            registrar_pedido(t.pk, self.e.garzon_a, nuevo_token(), [chuleta_con(self.e, self.e.arroz), {"plato": self.e.naranja.pk}])
+
+        self.assertEqual(self._consultas_historial(), base)
+
+    def _consultas_historial(self):
+        from django.test.utils import CaptureQueriesContext
+
+        with CaptureQueriesContext(connection) as consultas:
+            self.client.get(reverse("consumos:historial"))
+        return len(consultas)
+
 
 class EtiquetaYConfiguracionDespachoTests(TestCase):
     def setUp(self):

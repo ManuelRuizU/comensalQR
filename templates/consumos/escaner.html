@@ -18,7 +18,7 @@
                 <a href="{% url 'consumos:historial' %}">{% if request.user.is_staff %}Historial{% else %}Consumos de hoy{% endif %}</a>
                 {% if request.user.is_staff %}<a href="{% url 'consumos:dashboard' %}">Dashboard</a><a href="{% url 'despacho:verificar' %}">Verificar despacho</a>{% endif %}
                 <button id="cq-install-pwa" type="button" hidden>Instalar app</button>
-                <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Salir</button></form>
+                <form method="post" action="{% url 'logout' %}" id="form-salir">{% csrf_token %}<button type="submit">Salir</button></form>
             </div>
         </details>
     </header>
@@ -45,6 +45,10 @@
         <button id="btn-ultimos" type="button">
             <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
             <span>Últimos</span>
+        </button>
+        <button id="btn-salir-mesa" type="button" hidden>
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M10 16l-4-4 4-4M6 12h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>Salir de la mesa</span>
         </button>
     </nav>
 </div>
@@ -96,6 +100,8 @@
     const URL_LIBERAR = "{% url 'consumos:liberar' %}";
     const URL_RENOVAR = "{% url 'consumos:renovar' %}";
     const URL_CONFIRMAR = "{% url 'consumos:confirmar' %}";
+    const URL_REVALIDAR_MESA = "{% url 'consumos:revalidar_mesa' %}";
+    const CLAVE_MESA = "cq-mesa-{{ request.user.pk }}";
     const URL_DISPONIBILIDAD = "{% url 'menus:disponibilidad_hoy' %}";
     const scanForm = document.getElementById("scan-form");
     const stage = document.getElementById("scan-stage");
@@ -281,6 +287,9 @@
                 headers: { "X-Requested-With": "XMLHttpRequest" },
             });
             result = await leerJson(response);
+            // 409 mesa_invalida: la mesa activa se desactivó o cambió de local mientras tanto
+            // (un QR de mesa rechazado responde 400 y no cambia la mesa activa).
+            if (response.status === 409 && result.code === "mesa_invalida") activarMesa(null);
             // «Falta la mesa» es un aviso (naranja), no un QR inválido.
             if (!response.ok && result.status !== "sin_mesa") result.status = "error";
         } catch (error) {
@@ -416,16 +425,53 @@
 
     // --- Modo mesa --------------------------------------------------------------------
     // El escáner es solo para atención en el local: cada almuerzo necesita la mesa activa,
-    // con o sin menú. La mesa dura hasta escanear otra o cerrar el escáner (vive solo en
-    // esta pantalla). Los envíos a empresas se registran en la pantalla Despacho.
+    // con o sin menú. Hay una sola mesa activa: dura hasta escanear otra (cambio automático)
+    // o tocar «Salir de la mesa». Se guarda en sessionStorage para sobrevivir recargas y
+    // navegación (historial, dashboard) dentro de la sesión de trabajo; abrir la app de
+    // nuevo parte sin mesa. Los envíos a empresas se registran en la pantalla Despacho.
     let mesaActiva = null; // { id, nombre }
     const indicadorMesa = document.getElementById("mesa-activa");
+    const btnSalirMesa = document.getElementById("btn-salir-mesa");
+    function guardarMesa(mesa) {
+        try {
+            if (mesa) sessionStorage.setItem(CLAVE_MESA, JSON.stringify({ id: mesa.id, nombre: mesa.nombre }));
+            else sessionStorage.removeItem(CLAVE_MESA);
+        } catch (e) { /* sin almacenamiento: la mesa vive solo en esta pantalla */ }
+    }
+    function mesaGuardada() {
+        try {
+            const mesa = JSON.parse(sessionStorage.getItem(CLAVE_MESA) || "null");
+            return mesa && mesa.id ? mesa : null;
+        } catch (e) { return null; }
+    }
+    function pintarMesa(texto, estado) {
+        indicadorMesa.textContent = texto;
+        indicadorMesa.classList.toggle("is-active", estado === "activa");
+        indicadorMesa.classList.toggle("is-pendiente", estado !== "activa");
+    }
     function activarMesa(mesa) {
         mesaActiva = mesa;
-        indicadorMesa.textContent = mesa ? mesa.nombre.toUpperCase() : "Escanea la mesa";
-        indicadorMesa.classList.toggle("is-active", Boolean(mesa));
-        indicadorMesa.classList.toggle("is-pendiente", !mesa);
+        guardarMesa(mesa);
+        pintarMesa(mesa ? mesa.nombre.toUpperCase() : "Escanea la mesa", mesa ? "activa" : "pendiente");
+        btnSalirMesa.hidden = !mesa;
     }
+    async function restaurarMesa() {
+        // La mesa guardada solo se muestra activa si el servidor confirma que sigue activa
+        // y es del local de quien escanea; si no (o sin conexión), se descarta.
+        const guardada = mesaGuardada();
+        if (!guardada) return;
+        pintarMesa("Verificando mesa…", "pendiente");
+        try {
+            const response = await postForm(URL_REVALIDAR_MESA, { mesa_id: guardada.id });
+            const data = await response.json();
+            if (mesaActiva) return;  // el garzón escaneó otra mesa mientras tanto
+            activarMesa(response.ok && data.status === "mesa" ? { id: data.table_id, nombre: data.table } : null);
+        } catch (e) {
+            if (!mesaActiva) activarMesa(null);
+        }
+    }
+    btnSalirMesa.addEventListener("click", () => activarMesa(null));
+    document.getElementById("form-salir").addEventListener("submit", () => guardarMesa(null));
     function camposModo() {
         return mesaActiva ? { mesa_id: mesaActiva.id } : {};
     }
@@ -679,6 +725,7 @@
         useBarCodeDetectorIfSupported: true,
         verbose: false,
     });
+    restaurarMesa();
     startScanner();
 </script>
 {% endblock %}

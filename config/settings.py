@@ -65,6 +65,7 @@ INSTALLED_APPS = [
     "operadores",
     "menus",
     "pedidos",
+    "mesas",
 ]
 
 MIDDLEWARE = [

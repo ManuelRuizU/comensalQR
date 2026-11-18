@@ -214,7 +214,9 @@ def registro_inicial(request):
 
     form_local = LocalForm(request.POST or None, prefix="local")
     form_admin = AdministradorForm(request.POST or None, prefix="admin", con_local=False)
+    # El registro inicial pide lo mínimo: el local nace activo y con cierre de despacho a las 10:00.
     form_local.fields.pop("activo", None)
+    form_local.fields.pop("hora_cierre_despacho", None)
     if request.method == "POST" and form_local.is_valid() and form_admin.is_valid():
         with transaction.atomic():
             if hay_administradores():

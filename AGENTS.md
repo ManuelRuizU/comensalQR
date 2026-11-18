@@ -36,8 +36,12 @@ Permitir que un restaurante registre mediante QR:
 - Historial de consumos (búsqueda por RUT; el operador solo ve el día en curso)
 - Gestión de operadores (activar/desactivar, cambiar clave y local)
 - Edición de trabajadores (datos, excepción de cupo y estado activo)
+- Código interno del trabajador, opcional por empresa (Empresa.usa_codigo_interno):
+  ficha, importación (columna codigo_interno), guía de despacho y búsqueda
+  manual secundaria. Único por empresa entre vigentes; no reemplaza al RUT ni
+  va en el QR
 
-## v0.2 — Fase 1 (en curso)
+## v0.2 — Fase 1 (terminada)
 
 - Menú del día por local con tiempos, platos, acompañamientos y porciones
 - Reserva temporal de porciones (90 s) y confirmación con bloqueo de filas
@@ -46,7 +50,38 @@ Permitir que un restaurante registre mediante QR:
 - Informe de cierre de porciones
 - Sin menú publicado hoy, el escáner funciona como en v0.1
 
-Las fases siguientes (mesas, cocina, impresión) no se implementan hasta que se
+## v0.2 — Fase 2 (terminada): Mesas
+
+- Mesas por local con QR propio (token aleatorio), crear, desactivar y
+  reactivar, PDF A4 con sus QR
+- Mesa obligatoria en el local: el escáner (QR o RUT, con o sin menú) no
+  registra nada si no hay mesa activa («Escanea primero la mesa»). El escáner
+  es solo para atención en el local; no tiene modo despacho
+- El pedido y el consumo guardan la mesa; una mesa inactiva o de otro local se
+  rechaza
+- Mesa y folio visibles en el historial y en el resultado del escaneo
+- Una sola mesa activa, recordada en sessionStorage durante la sesión de
+  trabajo y revalidada con el servidor al abrir el escáner; botón «Salir de
+  la mesa»
+- Historial con filtros por mesa y por garzón, y los platos de cada pedido
+
+## Despacho a empresas (solo administrador)
+
+Flujo en 5 pasos: 1) el administrador recibe y registra la lista nominal antes
+del cierre; 2) la cocina ve totales por plato; 3) el encargado imprime
+etiquetas; 4) el encargado verifica escaneando las etiquetas; 5) el repartidor
+entrega con la guía firmada.
+
+- registrar_pedido(despacho=True) solo desde el servicio de despacho y solo
+  con un administrador (si no, despacho_no_permitido)
+- Hora de cierre configurada por el restaurante (Local, con excepción por
+  Empresa); después del cierre solo anulación con motivo
+- Se cobra lo confirmado, coma o no el trabajador
+- Tipo de envase por empresa: individual o marmita
+- Etiquetas con token propio (Pedido.token_etiqueta / marmita); nunca imprimir
+  el QR del trabajador en etiquetas, guías ni hojas de reparto
+
+Las fases siguientes (cocina, impresión) no se implementan hasta que se
 pidan. Nada de la sección «Futuro» de la especificación.
 
 ## NO implementar todavía

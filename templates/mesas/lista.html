@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Mesas | ComensalQR{% endblock %}
+{% block content %}
+<div class="cq-heading">
+    <div>
+        <div class="cq-eyebrow">Configuración</div><h1>Mesas</h1>
+        <p class="cq-subtitle">{{ local|default:"Sin local" }}. El garzón escanea el QR de la mesa y luego a cada comensal: sin mesa no se registra ningún almuerzo en el local.</p>
+    </div>
+    <div class="cq-actions">
+        {% if local %}<a class="btn btn-primary" href="{% url 'mesas:pdf' %}?local={{ local.pk }}">QR de todas (PDF)</a>{% endif %}
+        <a class="btn btn-outline-secondary" href="{% url 'menus:menu_dia' %}">Volver al menú</a>
+    </div>
+</div>
+
+{% if locales|length > 1 %}
+<form method="get" class="cq-card p-3 mb-4 d-flex flex-wrap gap-2 align-items-end">
+    <div><label class="form-label" for="sel-local">Local</label><select class="form-select" id="sel-local" name="local">{% for l in locales %}<option value="{{ l.pk }}" {% if l == local %}selected{% endif %}>{{ l.nombre }}</option>{% endfor %}</select></div>
+    <button class="btn btn-outline-primary" type="submit">Ver</button>
+</form>
+{% endif %}
+
+{% if not local %}
+    <div class="cq-banner cq-banner-warning">No hay locales activos. <a href="{% url 'locales:crear' %}">Crea un local</a> para agregar mesas.</div>
+{% else %}
+<div class="row g-4">
+    <div class="col-12 col-lg-8"><div class="cq-card p-3">
+        <form method="get" action="{% url 'mesas:pdf' %}" id="form-pdf-mesas"><input type="hidden" name="local" value="{{ local.pk }}"></form>
+        <div class="cq-table-wrap"><table class="table cq-table">
+            <thead><tr><th></th><th>Mesa</th><th>Estado</th><th></th></tr></thead>
+            <tbody>
+            {% for mesa in mesas %}<tr{% if not mesa.activa %} class="cq-anulado"{% endif %}>
+                <td>{% if mesa.activa %}<input type="checkbox" name="mesas" value="{{ mesa.pk }}" form="form-pdf-mesas" aria-label="Seleccionar {{ mesa.nombre }}">{% endif %}</td>
+                <td class="fw-semibold">{{ mesa.nombre }}</td>
+                <td>{% if mesa.activa %}<span class="badge text-bg-success">Activa</span>{% else %}<span class="badge text-bg-secondary">Desactivada</span>{% endif %}</td>
+                <td class="text-end">
+                    <form method="post" action="{% url 'mesas:estado' mesa.pk %}" class="d-inline"{% if mesa.activa %} data-confirm-message="El QR de {{ mesa.nombre }} dejará de aceptarse en el escáner. ¿Desactivarla?"{% endif %}>{% csrf_token %}
+                        {% if mesa.activa %}<button class="btn btn-sm btn-outline-danger" name="accion" value="desactivar">Desactivar</button>
+                        {% else %}<button class="btn btn-sm btn-outline-success" name="accion" value="reactivar">Reactivar</button>{% endif %}
+                    </form>
+                </td>
+            </tr>{% empty %}<tr><td colspan="4" class="text-secondary">Todavía no hay mesas en este local.</td></tr>{% endfor %}
+            </tbody>
+        </table></div>
+        {% if mesas %}<button class="btn btn-outline-primary btn-sm mt-2" type="submit" form="form-pdf-mesas">QR de las seleccionadas (PDF)</button>{% endif %}
+        <p class="text-secondary small mt-2 mb-0">PDF A4 con 6 tarjetas por hoja, las mismas que se imprimen para los trabajadores.</p>
+    </div></div>
+    <div class="col-12 col-lg-4">
+        <form method="post" action="{% url 'mesas:crear' %}" class="cq-card cq-form-card">{% csrf_token %}
+            <h2 class="h5 mb-3">Nueva mesa</h2>
+            <input type="hidden" name="local" value="{{ local.pk }}">
+            <div class="cq-form-field mb-3"><label for="nombre-mesa">Nombre</label><input class="form-control" id="nombre-mesa" name="nombre" maxlength="30" required placeholder="Ej.: Mesa 4"></div>
+            <div class="cq-form-actions"><button class="btn btn-primary" type="submit">Crear mesa</button></div>
+        </form>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

@@ -16,6 +16,19 @@ class Empresa(models.Model):
         validators=[MinValueValidator(1), MaxValueValidator(10)],
         help_text="Almuerzos diarios autorizados por trabajador, salvo excepción individual.",
     )
+    hora_cierre_despacho = models.TimeField(
+        null=True, blank=True,
+        help_text="Vacío = usa la hora de cierre del local.",
+    )
+    ENVASE_INDIVIDUAL = "individual"
+    ENVASE_MARMITA = "marmita"
+    TIPOS_ENVASE = [(ENVASE_INDIVIDUAL, "Individual"), (ENVASE_MARMITA, "Marmita")]
+    tipo_envase = models.CharField(max_length=12, choices=TIPOS_ENVASE, default=ENVASE_INDIVIDUAL)
+    usa_codigo_interno = models.BooleanField(
+        default=False,
+        help_text="Muestra el código interno del trabajador en su ficha, la importación, "
+        "la guía de despacho y la búsqueda manual del escáner.",
+    )
     activa = models.BooleanField(default=True)
     creada_en = models.DateTimeField(auto_now_add=True)
 

@@ -131,7 +131,7 @@ Especificación completa: `docs/v0.2-menu-mesas-cocina.md`.
 - **Escáner con menú publicado**: escanear (o buscar por RUT) no registra
   nada; abre la hoja de pedido. Cada opción tocada reserva 1 porción por 90 s.
   Al confirmar se crean juntos el consumo, el pedido y su folio diario
-  («Pedido 0042 · Sin mesa»). Si falta una porción, la hoja sigue abierta para
+  («Pedido 0042 · Mesa 3»). Si falta una porción, la hoja sigue abierta para
   elegir otra opción.
 - **Sin menú publicado** hoy en el local (o usuario sin local), el escáner
   funciona igual que en v0.1.
@@ -141,6 +141,50 @@ Especificación completa: `docs/v0.2-menu-mesas-cocina.md`.
   devuelve sus porciones y su folio no se reutiliza.
 - **Informe de cierre**: por ítem, porciones cargadas, ajustes, servidas,
   anuladas y quedan.
+
+Mesas (v0.2, Fase 2)
+
+- **Mesas** (administrador, desde **Menú → Mesas**): crear, desactivar y
+  reactivar mesas por local, y descargar sus QR en PDF A4 (6 por hoja). El QR
+  contiene solo un token aleatorio.
+- **Mesa obligatoria en el local**: el escáner arranca en «Escanea la mesa».
+  Si no hay mesa activa no se toma ningún pedido ni se registra ningún
+  almuerzo, con o sin menú, por QR o por RUT. Escanear el QR de una mesa la
+  activa («MESA 3» arriba). Hay una sola mesa activa: dura hasta escanear otra
+  (cambio automático) o tocar «Salir de la mesa». Se recuerda durante la
+  sesión de trabajo del navegador (recargas, ir al historial y volver), pero
+  abrir la app de nuevo o cerrar sesión parte sin mesa. Al volver al escáner,
+  la mesa recordada se revalida con el servidor: si se desactivó o es de otro
+  local, se descarta y vuelve «Escanea la mesa». El pedido y el consumo
+  guardan la mesa. Un local sin mesas activas no puede registrar almuerzos.
+- Una mesa desactivada o de otro local se rechaza al escanearla y al
+  confirmar.
+- El folio y la mesa aparecen en el resultado del escaneo, en «Tus últimos
+  registros» y en la columna Pedido del historial, junto con los platos del
+  pedido.
+
+Despacho a empresas (solo administrador)
+
+El trabajador no está presente, así que el despacho no pasa por el escáner.
+
+1. **Registrar la lista** (menú **Despacho**): empresa y fecha, casilla
+   «almuerza» y colación por trabajador, antes de la hora de cierre. Si alguno
+   no tiene cupo o porción, los demás se registran y se informa quién falló.
+2. **Cocina**: totales por plato de cada empresa (en la pantalla Despacho;
+   la pantalla de cocina llega en la Fase 3).
+3. **Imprimir etiquetas**: individuales (una por pedido) o de marmita (una por
+   plato, más la hoja de reparto). Pegar la etiqueta en una parte fría del
+   envase.
+4. **Verificar despacho**: escanear las etiquetas hasta «Listo para
+   despachar» (desde el menú del escáner o la pantalla Despacho).
+5. **Entregar** con la guía de despacho firmada por quien recibe.
+
+- **Hora de cierre**: la configura el restaurante en Locales (10:00 por
+  defecto) y cada empresa puede tener la suya en Empresas. Después del cierre
+  la lista queda fija; solo se anula con motivo en Pedidos del día.
+- **Cobro**: se cobra lo confirmado, coma o no el trabajador.
+- **Envase**: individual o marmita, por empresa.
+- Las etiquetas llevan un QR propio del pedido; nunca el QR del trabajador.
 
 Pruebas de concurrencia: requieren PostgreSQL real (bloqueo de filas). Se
 omiten con `config.test_settings` (SQLite) y se ejecutan con:
@@ -214,6 +258,24 @@ Desde el listado de trabajadores de una empresa (o su perfil), **Importar desde 
 2. Sube el archivo `.xlsx` o `.csv` (se aceptan `,` y `;`, y codificación UTF-8 o la de Excel en Windows). Máximo 2 MB y 2000 filas.
 3. Revisa la vista previa. Si alguna fila tiene errores (RUT inválido, repetido en el archivo o ya vigente en la empresa, nombre faltante, cupo fuera de 1–10) no se importa nada.
 4. Confirma: se crean todos los trabajadores en una sola transacción, cada uno con su QR.
+
+### Código interno del trabajador (opcional por empresa)
+
+Beneficio que el administrador activa por empresa con **Usa código interno de
+trabajador**. No reemplaza al RUT ni va en el QR.
+
+- **Apagado** (por defecto): el código no aparece en la ficha del trabajador,
+  la importación ni la guía de despacho, y no se busca en el registro manual.
+- **Encendido**:
+  - La ficha del trabajador muestra «Código interno» (opcional).
+  - La importación acepta la columna opcional `codigo_interno`, y la plantilla la
+    incluye.
+  - La guía de despacho muestra la columna «Código».
+  - El registro manual del escáner lo busca como búsqueda secundaria, si el RUT
+    no es válido o no encuentra a nadie.
+- El código es único entre los trabajadores vigentes de la misma empresa; dos
+  empresas pueden repetirlo. Si una empresa apaga el beneficio, los códigos se
+  conservan pero dejan de mostrarse y de buscarse.
 
 ### Tarjetas QR: papel y teléfono
 
@@ -331,8 +393,12 @@ Se puede consultar desde el menú Historial, con filtros por:
 - Consumos de una empresa.
 - Consumos de un trabajador.
 - RUT: muestra todos los consumos de la persona en todas sus empresas, con el total.
+- Mesa (incluye los pedidos que guardaron la mesa solo en el pedido).
+- Garzón: lo que registró ese operador o administrador.
 
-El operador solo ve los consumos del día en curso.
+Cada fila con pedido muestra sus platos (plato + acompañamiento y los demás
+tiempos). El operador solo ve los consumos del día en curso, también con
+estos filtros; elige entre las mesas y garzones de su local.
 
 ---
 

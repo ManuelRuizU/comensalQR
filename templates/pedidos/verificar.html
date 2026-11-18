@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Verificar despacho | ComensalQR{% endblock %}
+{% block body_class %}cq-scanner-body{% endblock %}
+{% block navbar %}{% endblock %}
+{% block main %}
+<div class="cq-scan-app">
+    <header class="cq-scan-top">
+        <a class="cq-scan-brand" href="{% url 'despacho:lista' %}{% if empresa %}?empresa={{ empresa.pk }}&amp;fecha={{ fecha|date:'Y-m-d' }}{% endif %}">← Despacho</a>
+        {% if progreso %}<span class="cq-scan-mesa is-active" id="progreso" role="status">{{ progreso.verificados }} / {{ progreso.total }}</span>{% endif %}
+    </header>
+
+    {% if not empresa %}
+        <form method="get" class="cq-verificar-elegir">
+            <h1>Verificar despacho</h1>
+            <p>Elige la empresa y escanea las etiquetas una por una. Es solo control: no cambia pedidos ni cobros.</p>
+            <label for="sel-empresa">Empresa</label>
+            <select class="form-select" id="sel-empresa" name="empresa" required>{% for e in empresas %}<option value="{{ e.pk }}">{{ e.nombre }}</option>{% endfor %}</select>
+            <label for="sel-fecha">Fecha</label>
+            <input class="form-control" id="sel-fecha" type="date" name="fecha" value="{{ fecha|date:'Y-m-d' }}">
+            <button class="btn btn-primary" type="submit">Empezar</button>
+        </form>
+    {% elif not local %}
+        <p class="cq-scan-aviso">Tu usuario no tiene local asignado.</p>
+    {% else %}
+        <p class="cq-scan-aviso cq-verificar-titulo">{{ empresa }} · {{ fecha|date:"d/m/Y" }} · {% if empresa.tipo_envase == "marmita" %}marmitas{% else %}etiquetas individuales{% endif %}</p>
+        <section class="cq-scan-stage" id="scan-stage">
+            <div id="reader" class="cq-scan-reader"></div>
+            <div class="cq-scan-status"><span id="scanner-status-text">Iniciando cámara…</span></div>
+            <div id="scan-result" class="cq-result" role="status" aria-live="assertive" hidden></div>
+        </section>
+        <section class="cq-verificar-faltantes">
+            <div id="listo" class="cq-verificar-listo" {% if not progreso.listo %}hidden{% endif %}>✓ Listo para despachar</div>
+            <h2>Faltan <span id="num-faltantes">{{ progreso.faltantes|length }}</span></h2>
+            <ul id="faltantes">{% for nombre in progreso.faltantes %}<li>{{ nombre }}</li>{% endfor %}</ul>
+        </section>
+        <form id="scan-form" hidden>{% csrf_token %}</form>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_scripts %}{% if empresa and local %}
+<script src="{% static 'vendor/html5-qrcode-2.3.8.min.js' %}"></script>
+<script>
+(function () {
+    const URL_LEER = "{% url 'despacho:verificar_lectura' %}";
+    const EMPRESA = "{{ empresa.pk }}", FECHA = "{{ fecha|date:'Y-m-d' }}";
+    const resultado = document.getElementById("scan-result");
+    const estado = document.getElementById("scanner-status-text");
+    let ultimo = null, ultimoEn = 0, ocupado = false, temporizador = null;
+
+    function tono(frecuencia, tipo) {
+        try {
+            const C = window.AudioContext || window.webkitAudioContext; if (!C) return;
+            window.cqAudio = window.cqAudio || new C();
+            const o = window.cqAudio.createOscillator(), g = window.cqAudio.createGain();
+            o.frequency.value = frecuencia; o.type = tipo; g.gain.value = 0.1;
+            o.connect(g).connect(window.cqAudio.destination); o.start(); o.stop(window.cqAudio.currentTime + 0.18);
+        } catch (e) { /* sin audio */ }
+    }
+
+    function mostrar(datos) {
+        const tipo = { ok: "success", duplicada: "warning" }[datos.status] || "danger";
+        const titulo = { ok: "Verificada", duplicada: "Ya verificada" }[datos.status] || "Rechazada";
+        resultado.className = `cq-result cq-result-${tipo}`;
+        resultado.replaceChildren();
+        const t = document.createElement("div"); t.className = "cq-result-title"; t.textContent = titulo;
+        const d = document.createElement("div"); d.className = "cq-result-detail"; d.textContent = datos.message;
+        resultado.append(t, d);
+        resultado.hidden = false;
+        clearTimeout(temporizador);
+        temporizador = setTimeout(() => { resultado.hidden = true; }, 2500);
+        tipo === "success" ? tono(880, "sine") : tono(220, "square");
+        if (navigator.vibrate) navigator.vibrate(tipo === "success" ? 80 : [90, 60, 90]);
+        const p = datos.progress;
+        if (!p) return;
+        document.getElementById("progreso").textContent = `${p.verified} / ${p.total}`;
+        document.getElementById("num-faltantes").textContent = p.missing.length;
+        const lista = document.getElementById("faltantes");
+        lista.replaceChildren(...p.missing.map((n) => { const li = document.createElement("li"); li.textContent = n; return li; }));
+        document.getElementById("listo").hidden = !p.ready;
+    }
+
+    async function leer(token) {
+        const ahora = Date.now();
+        if (ocupado || (token === ultimo && ahora - ultimoEn < 3000)) return;  // misma etiqueta frente a la cámara
+        ultimo = token; ultimoEn = ahora; ocupado = true;
+        const datos = new FormData(document.getElementById("scan-form"));
+        datos.set("empresa", EMPRESA); datos.set("fecha", FECHA); datos.set("token", token.trim());
+        try {
+            const r = await fetch(URL_LEER, { method: "POST", body: datos, headers: { "X-Requested-With": "XMLHttpRequest" } });
+            mostrar(await r.json());
+        } catch (e) {
+            mostrar({ status: "rechazada", message: "Sin conexión con el servidor. Vuelve a escanear." });
+        } finally { ocupado = false; }
+    }
+    window.cqLeerEtiqueta = leer;  // también usado por las pruebas en el navegador
+
+    const lector = new Html5Qrcode("reader", { formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE], useBarCodeDetectorIfSupported: true, verbose: false });
+    lector.start({ facingMode: "environment" }, { fps: 15, qrbox: (w, h) => { const l = Math.max(200, Math.floor(Math.min(w, h) * 0.85)); return { width: l, height: l }; }, aspectRatio: 1.0 }, leer, () => {})
+        .then(() => { estado.textContent = "Escanea las etiquetas"; })
+        .catch(() => { estado.textContent = "No se pudo iniciar la cámara"; });
+})();
+</script>
+{% endif %}{% endblock %}

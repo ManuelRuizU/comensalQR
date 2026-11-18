@@ -9,7 +9,7 @@
 {% if not token %}
 <div class="cq-card mb-4"><div class="cq-card-body">
     <ol class="mb-3">
-        <li>Descarga la <a href="{% url 'trabajadores:plantilla' %}">plantilla Excel</a> y completa una fila por trabajador: <strong>nombre, apellido, rut</strong> y, opcionalmente, <strong>almuerzos_diarios</strong>.</li>
+        <li>Descarga la <a href="{% url 'trabajadores:plantilla' %}{% if empresa.usa_codigo_interno %}?codigo_interno=1{% endif %}">plantilla Excel</a> y completa una fila por trabajador: <strong>nombre, apellido, rut</strong> y, opcionalmente, <strong>almuerzos_diarios</strong>{% if empresa.usa_codigo_interno %} y <strong>codigo_interno</strong>{% endif %}.</li>
         <li>Sube el archivo (.xlsx o .csv). Verás una vista previa antes de guardar.</li>
         <li>Si alguna fila tiene errores no se importa nada: corrige el archivo y vuelve a subirlo.</li>
     </ol>
@@ -30,11 +30,11 @@
         <div class="cq-banner cq-banner-success"><strong>{{ validas }} trabajador(es) listos para importar.</strong> Revisa la lista y confirma.</div>
     {% endif %}
     <div class="cq-table-wrap"><table class="table cq-table">
-        <thead><tr><th>Fila</th><th>Nombre</th><th>Apellido</th><th>RUT</th><th>Almuerzos/día</th><th>Estado</th></tr></thead>
+        <thead><tr><th>Fila</th><th>Nombre</th><th>Apellido</th><th>RUT</th>{% if empresa.usa_codigo_interno %}<th>Código</th>{% endif %}<th>Almuerzos/día</th><th>Estado</th></tr></thead>
         <tbody>
             {% for fila in filas %}
             <tr{% if not fila.valida %} class="table-danger"{% endif %}>
-                <td>{{ fila.numero }}</td><td>{{ fila.nombre }}</td><td>{{ fila.apellido }}</td><td>{{ fila.rut }}</td>
+                <td>{{ fila.numero }}</td><td>{{ fila.nombre }}</td><td>{{ fila.apellido }}</td><td>{{ fila.rut }}</td>{% if empresa.usa_codigo_interno %}<td>{{ fila.codigo_interno|default:"" }}</td>{% endif %}
                 <td>{% if fila.almuerzos_diarios %}{{ fila.almuerzos_diarios }}{% else %}<span class="text-secondary">{{ empresa.almuerzos_diarios }} (empresa)</span>{% endif %}</td>
                 <td>{% if fila.valida %}<span class="badge text-bg-success">OK</span>{% else %}{% for error in fila.errores %}<div class="text-danger">{{ error }}</div>{% endfor %}{% endif %}</td>
             </tr>

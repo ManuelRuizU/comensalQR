@@ -135,7 +135,7 @@ def descargar_qr_zip(request, empresa_id):
 @user_passes_test(es_administrador, login_url="login")
 def plantilla_importacion(request):
     return _respuesta_archivo(
-        importacion.plantilla_xlsx(),
+        importacion.plantilla_xlsx(con_codigo_interno=request.GET.get("codigo_interno") == "1"),
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "plantilla-trabajadores-comensalqr.xlsx",
     )
@@ -205,6 +205,8 @@ def _confirmar_importacion(request, empresa):
             Empresa.objects.select_for_update().get(pk=empresa.pk)
             creados = []
             for fila in datos["filas"]:
+                if not empresa.usa_codigo_interno:
+                    fila = {**fila, "codigo_interno": None}  # se apagó el beneficio tras la vista previa
                 trabajador = Trabajador(empresa=empresa, **fila)
                 trabajador.full_clean()
                 trabajador.save()

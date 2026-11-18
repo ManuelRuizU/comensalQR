@@ -26,7 +26,11 @@ _ALIAS = {
     "almuerzos": "almuerzos_diarios",
     "cupo": "almuerzos_diarios",
     "cupo diario": "almuerzos_diarios",
+    # Solo se lee si la empresa usa código interno (Empresa.usa_codigo_interno).
+    "codigo interno": "codigo_interno",
+    "codigo": "codigo_interno",
 }
+LARGO_CODIGO = 20
 
 
 class ArchivoInvalido(Exception):
@@ -40,6 +44,7 @@ class FilaImportacion:
     apellido: str = ""
     rut: str = ""
     almuerzos_diarios: int | None = None
+    codigo_interno: str | None = None
     errores: list = field(default_factory=list)
 
     @property
@@ -52,6 +57,7 @@ class FilaImportacion:
             "apellido": self.apellido,
             "rut": self.rut,
             "almuerzos_diarios": self.almuerzos_diarios,
+            "codigo_interno": self.codigo_interno,
         }
 
 
@@ -134,6 +140,12 @@ def validar_filas(filas, empresa):
         Trabajador.objects.filter(empresa=empresa, eliminado_en__isnull=True).values_list("rut", flat=True)
     )
     ruts_en_archivo = {}
+    usa_codigo = empresa.usa_codigo_interno
+    codigos_existentes = set(
+        Trabajador.objects.filter(empresa=empresa, eliminado_en__isnull=True, codigo_interno__isnull=False)
+        .values_list("codigo_interno", flat=True)
+    ) if usa_codigo else set()
+    codigos_en_archivo = {}
     resultado = []
     for posicion, celdas in enumerate(datos, start=2):
         def valor(columna):
@@ -174,21 +186,34 @@ def validar_filas(filas, empresa):
                 fila.almuerzos_diarios = int(numero)
             except ValueError:
                 fila.errores.append("Almuerzos diarios debe ser un número entero entre 1 y 10, o quedar vacío.")
+
+        # Con la empresa sin código interno, la columna se ignora aunque venga en el archivo.
+        codigo = valor("codigo_interno") if usa_codigo else ""
+        if codigo:
+            fila.codigo_interno = codigo
+            if len(codigo) > LARGO_CODIGO:
+                fila.errores.append(f"El código interno supera los {LARGO_CODIGO} caracteres.")
+            elif codigo in codigos_existentes:
+                fila.errores.append("Ya existe un trabajador vigente con este código interno en la empresa.")
+            elif codigo in codigos_en_archivo:
+                fila.errores.append(f"Código interno repetido en el archivo (fila {codigos_en_archivo[codigo]}).")
+            else:
+                codigos_en_archivo[codigo] = posicion
         resultado.append(fila)
     return resultado
 
 
-def plantilla_xlsx():
+def plantilla_xlsx(con_codigo_interno=False):
     from openpyxl import Workbook
     from openpyxl.styles import Font
 
     libro = Workbook()
     hoja = libro.active
     hoja.title = "Trabajadores"
-    hoja.append(COLUMNAS_PLANTILLA)
+    hoja.append(COLUMNAS_PLANTILLA + (["codigo_interno"] if con_codigo_interno else []))
     for celda in hoja[1]:
         celda.font = Font(bold=True)
-    for columna, ancho in zip("ABCD", (24, 24, 16, 20)):
+    for columna, ancho in zip("ABCDE", (24, 24, 16, 20, 18)):
         hoja.column_dimensions[columna].width = ancho
 
     ayuda = libro.create_sheet("Instrucciones")
@@ -197,6 +222,7 @@ def plantilla_xlsx():
         ["nombre y apellido: obligatorios."],
         ["rut: obligatorio, con dígito verificador (ej. 12.345.678-5 o 12345678-5)."],
         ["almuerzos_diarios: opcional. Si queda vacío se usa el cupo de la empresa."],
+        *([["codigo_interno: opcional. Único dentro de la empresa (máx. 20 caracteres)."]] if con_codigo_interno else []),
         ["Si alguna fila tiene errores no se importa nada; corrige el archivo y vuelve a subirlo."],
     ):
         ayuda.append(linea)

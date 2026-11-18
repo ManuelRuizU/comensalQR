@@ -7,6 +7,7 @@
 <div class="cq-scan-app">
     <header class="cq-scan-top">
         <span class="cq-scan-brand">ComensalQR</span>
+        <span class="cq-scan-mesa is-pendiente" id="mesa-activa" role="status">Escanea la mesa</span>
         <span class="cq-scan-count">Hoy: <strong id="total-hoy">{{ total_hoy }}</strong></span>
         <details class="cq-scan-menu">
             <summary aria-label="Menú">
@@ -15,13 +16,14 @@
             <div class="cq-scan-menu-list">
                 <span class="cq-scan-menu-user">{{ request.user.get_full_name|default:request.user.get_username }}{% if local %} · {{ local }}{% endif %}</span>
                 <a href="{% url 'consumos:historial' %}">{% if request.user.is_staff %}Historial{% else %}Consumos de hoy{% endif %}</a>
-                {% if request.user.is_staff %}<a href="{% url 'consumos:dashboard' %}">Dashboard</a>{% endif %}
+                {% if request.user.is_staff %}<a href="{% url 'consumos:dashboard' %}">Dashboard</a><a href="{% url 'despacho:verificar' %}">Verificar despacho</a>{% endif %}
                 <button id="cq-install-pwa" type="button" hidden>Instalar app</button>
-                <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Salir</button></form>
+                <form method="post" action="{% url 'logout' %}" id="form-salir">{% csrf_token %}<button type="submit">Salir</button></form>
             </div>
         </details>
     </header>
 
+    {% if sin_mesas %}<p class="cq-scan-aviso" role="alert">{% if local %}{{ local }} no tiene mesas activas: sin mesa no se registran almuerzos. Pide al administrador crearlas en Menú → Mesas.{% else %}Tu usuario no tiene local asignado: no puede registrar almuerzos.{% endif %}</p>{% endif %}
     <section class="cq-scan-stage" id="scan-stage">
         <div id="reader" class="cq-scan-reader"></div>
         <div class="cq-scan-status" id="scanner-status">
@@ -44,14 +46,18 @@
             <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
             <span>Últimos</span>
         </button>
+        <button id="btn-salir-mesa" type="button" hidden>
+            <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4M10 16l-4-4 4-4M6 12h10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span>Salir de la mesa</span>
+        </button>
     </nav>
 </div>
 
 <dialog id="dlg-manual" class="cq-sheet" aria-labelledby="dlg-manual-title">
     <div class="cq-sheet-head"><h2 id="dlg-manual-title">Registro manual por RUT</h2><button type="button" class="cq-sheet-close" data-cerrar aria-label="Cerrar">×</button></div>
-    <p class="cq-sheet-help">Úsalo solo si el trabajador no trae su tarjeta ni su teléfono. Queda registrado como manual y a tu nombre.</p>
+    <p class="cq-sheet-help">Úsalo solo si el trabajador no trae su tarjeta ni su teléfono. Queda registrado como manual y a tu nombre.{% if con_codigo_interno %} También puedes buscar por código interno.{% endif %}</p>
     <form id="form-rut" class="cq-sheet-search">
-        <input id="input-rut" name="rut" inputmode="text" autocomplete="off" autocapitalize="characters" placeholder="12.345.678-5" required aria-label="RUT del trabajador">
+        <input id="input-rut" name="rut" inputmode="text" autocomplete="off" autocapitalize="characters" placeholder="{% if con_codigo_interno %}RUT o código interno{% else %}12.345.678-5{% endif %}" required aria-label="{% if con_codigo_interno %}RUT o código interno del trabajador{% else %}RUT del trabajador{% endif %}">
         <button type="submit" class="btn btn-primary">Buscar</button>
     </form>
     <div id="resultados-rut" class="cq-sheet-list" aria-live="polite"></div>
@@ -86,6 +92,7 @@
 
 {% block extra_scripts %}
 <script src="{% static 'vendor/html5-qrcode-2.3.8.min.js' %}"></script>
+<script src="{% static 'js/hoja_pedido.js' %}?v={{ static_version }}"></script>
 <script>
     const URL_REGISTRO = "{% url 'consumos:escaner' %}";
     const URL_BUSCAR = "{% url 'consumos:buscar_rut' %}";
@@ -93,6 +100,8 @@
     const URL_LIBERAR = "{% url 'consumos:liberar' %}";
     const URL_RENOVAR = "{% url 'consumos:renovar' %}";
     const URL_CONFIRMAR = "{% url 'consumos:confirmar' %}";
+    const URL_REVALIDAR_MESA = "{% url 'consumos:revalidar_mesa' %}";
+    const CLAVE_MESA = "cq-mesa-{{ request.user.pk }}";
     const URL_DISPONIBILIDAD = "{% url 'menus:disponibilidad_hoy' %}";
     const scanForm = document.getElementById("scan-form");
     const stage = document.getElementById("scan-stage");
@@ -191,9 +200,11 @@
 
     function showScanResult(data) {
         window.clearTimeout(resultTimerId);
-        const tipo = data.status === "registered" ? "success" : data.status === "duplicate" ? "warning" : "danger";
+        const tipo = ["registered", "mesa"].includes(data.status) ? "success" : ["duplicate", "sin_mesa"].includes(data.status) ? "warning" : "danger";
         let titulo = { success: "Registrado", warning: "Cupo agotado", danger: "No válido" }[tipo];
         if (tipo === "success" && data.folio) titulo = `Pedido ${data.folio} · ${data.table}`;
+        if (data.status === "mesa") titulo = data.table;
+        if (data.status === "sin_mesa") titulo = "Falta la mesa";
         const icono = { success: "✓", warning: "!", danger: "✕" }[tipo];
 
         resultPanel.replaceChildren();
@@ -206,6 +217,7 @@
             resultPanel.append(elemento("div", "cq-result-name", data.worker));
             const detalle = [data.company];
             if (data.quota) detalle.push(`Almuerzo ${data.used} de ${data.quota}`);
+            if (data.table && !data.folio) detalle.push(data.table);
             resultPanel.append(elemento("div", "cq-result-detail", detalle.join(" · ")));
             if (tipo === "success" && data.items && data.items.length) resultPanel.append(elemento("div", "cq-result-detail", data.items.join(" · ")));
             if (tipo === "warning" && data.time) resultPanel.append(elemento("div", "cq-result-detail", `Último registro a las ${data.time}`));
@@ -235,7 +247,7 @@
         ultimos.forEach((item) => {
             const fila = elemento("li", "cq-sheet-item");
             const texto = elemento("div");
-            texto.append(elemento("strong", "", item.worker), elemento("span", "", `${item.company} · ${item.folio ? `pedido ${item.folio}` : `almuerzo ${item.number}`}${item.manual ? " · manual" : ""}`));
+            texto.append(elemento("strong", "", item.worker), elemento("span", "", `${item.company} · ${item.folio ? `pedido ${item.folio} · ${item.table}` : `almuerzo ${item.number}${item.table ? ` · ${item.table}` : ""}`}${item.manual ? " · manual" : ""}`));
             fila.append(texto, elemento("span", "cq-sheet-time", item.time));
             listaUltimos.append(fila);
         });
@@ -244,7 +256,7 @@
     function actualizarContadores(data) {
         if (typeof data.today_total === "number") totalHoy.textContent = data.today_total;
         if (data.status === "registered") {
-            ultimos.unshift({ worker: data.worker, company: data.company, time: data.time, number: data.number, manual: data.manual, folio: data.folio });
+            ultimos.unshift({ worker: data.worker, company: data.company, time: data.time, number: data.number, manual: data.manual, folio: data.folio, table: data.table });
             ultimos = ultimos.slice(0, 5);
             pintarUltimos();
         }
@@ -266,7 +278,7 @@
         requestInProgress = true;
         statusText.textContent = "Registrando…";
         const formData = new FormData(scanForm);
-        Object.entries(campos).forEach(([clave, valor]) => formData.set(clave, valor));
+        Object.entries({ ...camposModo(), ...campos }).forEach(([clave, valor]) => formData.set(clave, valor));
         let result;
         try {
             const response = await fetch(URL_REGISTRO, {
@@ -275,12 +287,17 @@
                 headers: { "X-Requested-With": "XMLHttpRequest" },
             });
             result = await leerJson(response);
-            if (!response.ok) result.status = "error";
+            // 409 mesa_invalida: la mesa activa se desactivó o cambió de local mientras tanto
+            // (un QR de mesa rechazado responde 400 y no cambia la mesa activa).
+            if (response.status === 409 && result.code === "mesa_invalida") activarMesa(null);
+            // «Falta la mesa» es un aviso (naranja), no un QR inválido.
+            if (!response.ok && result.status !== "sin_mesa") result.status = "error";
         } catch (error) {
             result = { status: "error", message: "Sin conexión con el servidor. Intenta de nuevo." };
         } finally {
             requestInProgress = false;
         }
+        if (result.status === "mesa") activarMesa({ id: result.table_id, nombre: result.table });
         if (result.status === "seleccion") {
             // Hay menú publicado: el almuerzo se registra al confirmar el pedido.
             statusText.textContent = "Elige los platos";
@@ -406,6 +423,59 @@
         });
     });
 
+    // --- Modo mesa --------------------------------------------------------------------
+    // El escáner es solo para atención en el local: cada almuerzo necesita la mesa activa,
+    // con o sin menú. Hay una sola mesa activa: dura hasta escanear otra (cambio automático)
+    // o tocar «Salir de la mesa». Se guarda en sessionStorage para sobrevivir recargas y
+    // navegación (historial, dashboard) dentro de la sesión de trabajo; abrir la app de
+    // nuevo parte sin mesa. Los envíos a empresas se registran en la pantalla Despacho.
+    let mesaActiva = null; // { id, nombre }
+    const indicadorMesa = document.getElementById("mesa-activa");
+    const btnSalirMesa = document.getElementById("btn-salir-mesa");
+    function guardarMesa(mesa) {
+        try {
+            if (mesa) sessionStorage.setItem(CLAVE_MESA, JSON.stringify({ id: mesa.id, nombre: mesa.nombre }));
+            else sessionStorage.removeItem(CLAVE_MESA);
+        } catch (e) { /* sin almacenamiento: la mesa vive solo en esta pantalla */ }
+    }
+    function mesaGuardada() {
+        try {
+            const mesa = JSON.parse(sessionStorage.getItem(CLAVE_MESA) || "null");
+            return mesa && mesa.id ? mesa : null;
+        } catch (e) { return null; }
+    }
+    function pintarMesa(texto, estado) {
+        indicadorMesa.textContent = texto;
+        indicadorMesa.classList.toggle("is-active", estado === "activa");
+        indicadorMesa.classList.toggle("is-pendiente", estado !== "activa");
+    }
+    function activarMesa(mesa) {
+        mesaActiva = mesa;
+        guardarMesa(mesa);
+        pintarMesa(mesa ? mesa.nombre.toUpperCase() : "Escanea la mesa", mesa ? "activa" : "pendiente");
+        btnSalirMesa.hidden = !mesa;
+    }
+    async function restaurarMesa() {
+        // La mesa guardada solo se muestra activa si el servidor confirma que sigue activa
+        // y es del local de quien escanea; si no (o sin conexión), se descarta.
+        const guardada = mesaGuardada();
+        if (!guardada) return;
+        pintarMesa("Verificando mesa…", "pendiente");
+        try {
+            const response = await postForm(URL_REVALIDAR_MESA, { mesa_id: guardada.id });
+            const data = await response.json();
+            if (mesaActiva) return;  // el garzón escaneó otra mesa mientras tanto
+            activarMesa(response.ok && data.status === "mesa" ? { id: data.table_id, nombre: data.table } : null);
+        } catch (e) {
+            if (!mesaActiva) activarMesa(null);
+        }
+    }
+    btnSalirMesa.addEventListener("click", () => activarMesa(null));
+    document.getElementById("form-salir").addEventListener("submit", () => guardarMesa(null));
+    function camposModo() {
+        return mesaActiva ? { mesa_id: mesaActiva.id } : {};
+    }
+
     // --- Hoja de pedido (menú del día publicado) -----------------------------------
     // Cada opción tocada reserva 1 porción por 90 s. La garantía real está al confirmar:
     // el servidor vuelve a validar cupo y porciones con bloqueo de filas.
@@ -414,7 +484,6 @@
     const pedidoError = document.getElementById("pedido-error");
     const btnConfirmar = document.getElementById("pedido-confirmar");
     const btnAnterior = document.getElementById("pedido-anterior");
-    const ESTADO_TEXTO = { agotado: "Agotado", reservada_por_otro: "Agotado (reservada por otro garzón)" };
     let hoja = null; // { campos, token, menu, previous, seleccion: {tiempoId: {plato, acompanamiento}} }
     // Los toques se procesan en orden: un toque durante una reserva en curso no se pierde.
     let cola = Promise.resolve();
@@ -434,61 +503,17 @@
         pedidoError.hidden = !mensaje;
     }
 
-    const libre = (item) => item && !["agotado", "reservada_por_otro"].includes(item.estado);
-    const buscarPlato = (tiempo, id) => tiempo.platos.find((p) => p.id === id);
-
-    function textoQuedan(item) {
-        if (!libre(item)) return ESTADO_TEXTO[item.estado] || "Agotado";
-        return item.quedan === null ? "" : `quedan ${item.quedan}`;
-    }
-
-    function botonOpcion(item, seleccionado, alTocar) {
-        const boton = elemento("button", "cq-opcion");
-        boton.type = "button";
-        if (seleccionado) boton.classList.add("is-selected");
-        if (!libre(item) && !seleccionado) { boton.classList.add("is-off"); boton.disabled = true; }
-        else if (item.estado === "bajo") boton.classList.add("is-low");
-        boton.append(elemento("strong", "", item.nombre));
-        const quedan = textoQuedan(item);
-        if (quedan) boton.append(elemento("span", "", quedan));
-        boton.addEventListener("click", alTocar);
-        return boton;
-    }
-
-    function seleccionCompleta(tiempo) {
-        const elegido = hoja.seleccion[tiempo.id];
-        if (!elegido) return false;
-        const plato = buscarPlato(tiempo, elegido.plato);
-        return Boolean(plato) && (!plato.acompanamientos.length || Boolean(elegido.acompanamiento));
-    }
+    // Dibujo y reglas de la hoja: static/js/hoja_pedido.js (compartido con la pantalla Despacho).
+    const { libre, buscarPlato } = window.HojaPedido;
 
     function actualizarConfirmar() {
-        const listo = hoja.menu.tiempos.every((t) => !t.obligatorio || seleccionCompleta(t))
-            && Object.keys(hoja.seleccion).length > 0
-            && hoja.menu.tiempos.every((t) => !hoja.seleccion[t.id] || seleccionCompleta(t));
-        btnConfirmar.disabled = !listo || hoja.ocupado;
+        btnConfirmar.disabled = !HojaPedido.seleccionLista(hoja.menu, hoja.seleccion) || hoja.ocupado;
     }
 
     function pintarHoja() {
-        pedidoTiempos.replaceChildren();
-        hoja.menu.tiempos.forEach((tiempo) => {
-            const fila = elemento("section", "cq-pedido-tiempo");
-            fila.append(elemento("h3", "", tiempo.obligatorio ? tiempo.nombre : `${tiempo.nombre} (opcional)`));
-            const opciones = elemento("div", "cq-opciones");
-            const elegido = hoja.seleccion[tiempo.id];
-            tiempo.platos.forEach((plato) => {
-                opciones.append(botonOpcion(plato, elegido && elegido.plato === plato.id, () => encolar(() => tocarPlato(tiempo, plato))));
-            });
-            fila.append(opciones);
-            const platoElegido = elegido && buscarPlato(tiempo, elegido.plato);
-            if (platoElegido && platoElegido.acompanamientos.length) {
-                const acomps = elemento("div", "cq-opciones cq-opciones-sub");
-                platoElegido.acompanamientos.forEach((acomp) => {
-                    acomps.append(botonOpcion(acomp, elegido.acompanamiento === acomp.id, () => encolar(() => tocarAcomp(tiempo, platoElegido, acomp))));
-                });
-                fila.append(acomps);
-            }
-            pedidoTiempos.append(fila);
+        HojaPedido.pintar(pedidoTiempos, hoja.menu, hoja.seleccion, {
+            alTocarPlato: (tiempo, plato) => encolar(() => tocarPlato(tiempo, plato)),
+            alTocarAcomp: (tiempo, plato, acomp) => encolar(() => tocarAcomp(tiempo, plato, acomp)),
         });
         btnAnterior.hidden = !hoja.previous.length;
         actualizarConfirmar();
@@ -567,7 +592,7 @@
         hoja = { campos, token: data.selection_token, menu: data.menu, previous: data.previous || [], seleccion: {}, ocupado: false, etag: null };
         document.getElementById("pedido-nombre").textContent = data.worker;
         document.getElementById("pedido-detalle").textContent =
-            `${data.company} · Almuerzo ${data.used + 1} de ${data.quota}${data.manual ? " · manual" : ""}`;
+            `${data.company} · Almuerzo ${data.used + 1} de ${data.quota} · ${mesaActiva ? mesaActiva.nombre : ""}${data.manual ? " · manual" : ""}`;
         errorHoja("");
         pintarHoja();
         dlgPedido.showModal();
@@ -615,7 +640,7 @@
         let response;
         try {
             response = await postForm(URL_CONFIRMAR, {
-                ...hoja.campos, selection_token: hoja.token, seleccion: JSON.stringify(seleccion),
+                ...hoja.campos, ...camposModo(), selection_token: hoja.token, seleccion: JSON.stringify(seleccion),
             });
             data = await leerJson(response);
         } catch (error) {
@@ -631,6 +656,14 @@
             cerrarHoja({ liberarReservas: false });
             showScanResult(data);
             actualizarContadores(data);
+            return;
+        }
+        if (data.code === "mesa_invalida" || data.code === "mesa_obligatoria") {
+            // La mesa se desactivó mientras tanto (o se perdió): se cierra la hoja, se
+            // liberan las reservas y el garzón escanea otra mesa.
+            cerrarHoja({ liberarReservas: true });
+            activarMesa(null);
+            showScanResult({ ...data, status: data.code === "mesa_obligatoria" ? "sin_mesa" : "error" });
             return;
         }
         if (["porcion_agotada", "seleccion_incompleta", "reservada_por_otro"].includes(data.code)) {
@@ -692,6 +725,7 @@
         useBarCodeDetectorIfSupported: true,
         verbose: false,
     });
+    restaurarMesa();
     startScanner();
 </script>
 {% endblock %}

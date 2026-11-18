@@ -50,14 +50,15 @@ def _texto_ajustado(dibujo, texto, ancho_maximo, tamano, negrita=False, minimo=2
     return _fuente(minimo, negrita)
 
 
-def _imagen_qr(trabajador, lado):
+def imagen_qr(contenido, lado):
+    """QR cuadrado de `lado` px con el texto `contenido` (solo un token, nunca datos personales)."""
     qr = qrcode.QRCode(
         version=None,
         error_correction=qrcode.constants.ERROR_CORRECT_M,
         box_size=12,
         border=4,
     )
-    qr.add_data(str(trabajador.token_qr))
+    qr.add_data(str(contenido))
     qr.make(fit=True)
     imagen = qr.make_image(fill_color=COLOR_TEXTO, back_color="#ffffff").convert("RGB")
     return imagen.resize((lado, lado), Image.NEAREST)
@@ -74,7 +75,7 @@ def tarjeta_impresa(trabajador):
     empresa = trabajador.empresa.nombre
     dibujo.text((85, 245), empresa, fill=COLOR_SECUNDARIO, font=_texto_ajustado(dibujo, empresa, 830, 34))
     lado_qr = 720
-    tarjeta.paste(_imagen_qr(trabajador, lado_qr), ((1000 - lado_qr) // 2, 330))
+    tarjeta.paste(imagen_qr(trabajador.token_qr, lado_qr), ((1000 - lado_qr) // 2, 330))
     dibujo.text((85, 1090), "Presentar este código para registrar el almuerzo", fill=COLOR_SECUNDARIO, font=_fuente(26))
     return tarjeta
 
@@ -95,7 +96,7 @@ def tarjeta_telefono(trabajador):
     centrado(f"{trabajador.nombre} {trabajador.apellido}", 320, 64, COLOR_TEXTO, negrita=True)
     centrado(trabajador.empresa.nombre, 420, 46, COLOR_SECUNDARIO)
     lado_qr = 900
-    imagen.paste(_imagen_qr(trabajador, lado_qr), ((ancho - lado_qr) // 2, 540))
+    imagen.paste(imagen_qr(trabajador.token_qr, lado_qr), ((ancho - lado_qr) // 2, 540))
     centrado("Muestra esta imagen al registrar tu almuerzo", 1530, 40, COLOR_TEXTO)
     centrado("Sube el brillo de la pantalla si no se lee", 1600, 34, COLOR_SECUNDARIO)
     dibujo.rectangle((0, alto - 40, ancho, alto), fill=COLOR_MARCA)
@@ -128,7 +129,7 @@ def zip_telefono(trabajadores):
     return contenido.getvalue()
 
 
-def _hoja_a4(trabajadores):
+def _hoja_a4(elementos, dibujar):
     hoja = Image.new("RGB", A4_PIXELES, "#ffffff")
     dibujo = ImageDraw.Draw(hoja)
     ancho_celda = (A4_PIXELES[0] - 2 * MARGEN_HOJA) // COLUMNAS
@@ -147,25 +148,27 @@ def _hoja_a4(trabajadores):
         for x in range(MARGEN_HOJA, A4_PIXELES[0] - MARGEN_HOJA, 24):
             dibujo.line((x, y, x + 12, y), fill="#b8c4c0", width=2)
 
-    for indice, trabajador in enumerate(trabajadores):
+    for indice, elemento in enumerate(elementos):
         columna, fila = indice % COLUMNAS, indice // COLUMNAS
-        tarjeta = tarjeta_impresa(trabajador).resize(tamano, Image.LANCZOS)
+        tarjeta = dibujar(elemento).resize(tamano, Image.LANCZOS)
         x = MARGEN_HOJA + columna * ancho_celda + (ancho_celda - tamano[0]) // 2
         y = MARGEN_HOJA + fila * alto_celda + (alto_celda - tamano[1]) // 2
         hoja.paste(tarjeta, (x, y))
     return hoja
 
 
-def pdf_imprimible(trabajadores):
+def pdf_imprimible(elementos, dibujar=None):
     """PDF A4 con 6 tarjetas por hoja.
 
     Se escribe un PDF mínimo a mano, comprimiendo cada hoja sin pérdida (Flate)
     en cuanto se dibuja, para no mantener todas las hojas en memoria.
     """
-    trabajadores = list(trabajadores)
+    # `dibujar` arma la tarjeta de 1000x1220 px de cada elemento (por defecto, trabajadores).
+    dibujar = dibujar or tarjeta_impresa
+    elementos = list(elementos)
     hojas = [
-        trabajadores[i:i + TARJETAS_POR_HOJA]
-        for i in range(0, len(trabajadores), TARJETAS_POR_HOJA)
+        elementos[i:i + TARJETAS_POR_HOJA]
+        for i in range(0, len(elementos), TARJETAS_POR_HOJA)
     ] or [[]]
 
     salida = BytesIO()
@@ -187,7 +190,7 @@ def pdf_imprimible(trabajadores):
     for indice, grupo in enumerate(hojas):
         pagina, imagen, contenido = 3 + 3 * indice, 4 + 3 * indice, 5 + 3 * indice
         paginas.append(pagina)
-        hoja = _hoja_a4(grupo)
+        hoja = _hoja_a4(grupo, dibujar)
         datos = zlib.compress(hoja.tobytes(), 6)
         ancho_px, alto_px = hoja.size
         del hoja

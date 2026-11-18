@@ -40,6 +40,14 @@ class Consumo(models.Model):
         help_text="Local donde se registró el consumo (el del operador al momento del registro).",
     )
 
+    # Mesa escaneada al registrar en el local. Vacía en despachos y consumos anteriores.
+    mesa = models.ForeignKey(
+        "mesas.Mesa",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="consumos",
+    )
     # Anulación: solo mediante consumos.services.anular_consumo (administrador, con motivo).
     # Un consumo anulado no cuenta para el cupo ni para los totales, y no se cobra.
     anulado = models.BooleanField(default=False)

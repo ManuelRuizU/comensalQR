@@ -894,3 +894,41 @@ td:not(.text-end) .cq-item-panel { right: auto; left: 0; }
 .cq-pedido-acciones .btn[hidden] { display: none; }
 /* Las tablas con paneles flotantes no recortan su contenido en pantallas medianas o más grandes. */
 @media (min-width: 768px) { .cq-table-wrap.cq-con-paneles { overflow: visible; } }
+
+/* Modo mesa del escáner */
+.cq-scan-mesa { border: 0; border-radius: 999px; padding: 0.3rem 0.9rem; background: rgba(255, 255, 255, 0.12); color: #fff; font-weight: 800; font-size: 0.95rem; letter-spacing: .02em; }
+.cq-scan-mesa.is-active { background: #1fbf7a; color: #062d1d; font-size: 1.15rem; }
+.cq-scan-mesa.is-pendiente { background: #f5a524; color: #3a2400; }
+.cq-scan-aviso { margin: 0; padding: 0.55rem 0.9rem; background: #f5a524; color: #3a2400; font-weight: 700; font-size: 0.9rem; }
+
+/* Documentos imprimibles de despacho (etiquetas, hoja de reparto y guía) */
+.cq-etiquetas { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0; }
+.cq-etiqueta { display: flex; gap: 0.75rem; align-items: center; justify-content: space-between; border: 1px dashed #9aa5a1; padding: 0.8rem; min-height: 52mm; break-inside: avoid; background: #fff; color: #000; }
+.cq-etiqueta-titulo { font-size: 1.15rem; font-weight: 800; }
+.cq-etiqueta ul { margin: 0.3rem 0; padding-left: 1.1rem; }
+.cq-etiqueta-pie { font-size: 0.8rem; color: #444; }
+.cq-etiqueta-qr svg { width: 32mm; height: 32mm; display: block; }
+.cq-hoja-reparto { break-before: page; margin-top: 2rem; background: #fff; color: #000; }
+.cq-hoja-reparto ol { columns: 2; }
+.cq-guia { background: #fff; color: #000; padding: 1rem; }
+.cq-guia h1 { font-size: 1.6rem; margin: 0; }
+.cq-guia h2 { font-size: 1.1rem; margin-top: 1rem; }
+.cq-guia-totales { max-width: 28rem; }
+.cq-firma { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; margin-top: 3rem; }
+.cq-firma span { display: block; border-bottom: 1px solid #000; height: 2.5rem; margin-bottom: 0.3rem; }
+@media print {
+    .cq-imprimible .cq-navbar, .cq-no-imprimir, .cq-toast-container { display: none !important; }
+    .cq-imprimible, .cq-imprimible .cq-page { background: #fff !important; padding: 0 !important; }
+    @page { size: A4; margin: 10mm; }
+}
+
+/* Verificar despacho */
+.cq-verificar-elegir { display: grid; gap: 0.6rem; padding: 1.25rem; background: var(--cq-paper); color: var(--cq-ink); margin: 1rem; border-radius: 16px; }
+.cq-verificar-elegir h1 { font-size: 1.4rem; font-weight: 800; margin: 0; }
+.cq-verificar-titulo { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.cq-verificar-faltantes { background: var(--cq-paper); color: var(--cq-ink); padding: 0.8rem 1rem; max-height: 30vh; overflow-y: auto; }
+.cq-verificar-faltantes h2 { font-size: 1rem; font-weight: 800; margin: 0 0 0.3rem; }
+.cq-verificar-faltantes ul { margin: 0; padding-left: 1.1rem; columns: 2; }
+.cq-verificar-listo { background: #1fbf7a; color: #062d1d; font-weight: 800; font-size: 1.2rem; text-align: center; border-radius: 12px; padding: 0.6rem; margin-bottom: 0.6rem; }
+.cq-verificar-listo[hidden] { display: none; }
+a.cq-scan-brand { color: #fff; text-decoration: none; }

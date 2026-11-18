@@ -25,6 +25,22 @@ from .services import (
 )
 
 
+
+def dar_mesa(usuario, nombre_local="Restaurante de Prueba"):
+    """El escáner exige mesa: asigna al garzón (o administrador) un local con una mesa activa."""
+    from mesas.models import Mesa
+
+    local, _ = Local.objects.get_or_create(nombre=nombre_local, defaults={"direccion": "Calle 1"})
+    perfil = getattr(usuario, "perfil_operador", None)
+    if perfil is not None:
+        perfil.local = local
+        perfil.save(update_fields=["local"])
+    else:
+        Administrador.objects.update_or_create(usuario=usuario, defaults={"local": local})
+    mesa, _ = Mesa.objects.get_or_create(local=local, nombre="Mesa 1")
+    return mesa
+
+
 class ConsumoTests(TestCase):
     def setUp(self):
         self.usuario = get_user_model().objects.create_user(
@@ -32,6 +48,7 @@ class ConsumoTests(TestCase):
             password="una-clave-segura",
         )
         Operador.objects.create(usuario=self.usuario)
+        self.mesa = dar_mesa(self.usuario)
         self.empresa = Empresa.objects.create(
             nombre="Constructora ABC",
             rut="76111111-6",
@@ -115,7 +132,7 @@ class ConsumoTests(TestCase):
             ):
                 response = self.client.post(
                     reverse("consumos:escaner"),
-                    {"token": str(self.trabajador.token_qr)},
+                    {"token": str(self.trabajador.token_qr), "mesa_id": self.mesa.pk},
                     HTTP_X_REQUESTED_WITH="XMLHttpRequest",
                 )
 
@@ -146,6 +163,7 @@ class CupoDiarioPorEmpresaTests(TestCase):
     def setUp(self):
         self.operador = get_user_model().objects.create_user(username="mozo", password="x")
         Operador.objects.create(usuario=self.operador)
+        self.mesa = dar_mesa(self.operador)
         self.admin = get_user_model().objects.create_user(username="admin", password="x", is_staff=True)
         self.empresa_a = Empresa.objects.create(
             nombre="Empresa A", rut="76111111-6", direccion="Dir A", encargado_personal="RRHH A"
@@ -164,7 +182,7 @@ class CupoDiarioPorEmpresaTests(TestCase):
     def escanear(self, trabajador):
         return self.client.post(
             reverse("consumos:escaner"),
-            {"token": str(trabajador.token_qr)},
+            {"token": str(trabajador.token_qr), "mesa_id": self.mesa.pk},
             HTTP_X_REQUESTED_WITH="XMLHttpRequest",
         ).json()
 
@@ -212,7 +230,7 @@ class CupoDiarioPorEmpresaTests(TestCase):
 
         respuesta_b = self.client.post(
             reverse("consumos:escaner"),
-            {"token": str(self.en_b.token_qr)},
+            {"token": str(self.en_b.token_qr), "mesa_id": self.mesa.pk},
             HTTP_X_REQUESTED_WITH="XMLHttpRequest",
         )
         self.assertEqual(respuesta_b.status_code, 400)
@@ -287,6 +305,7 @@ class EscanerManualYContadorTests(TestCase):
     def setUp(self):
         self.operador = get_user_model().objects.create_user(username="mozo-man", password="x")
         Operador.objects.create(usuario=self.operador)
+        self.mesa = dar_mesa(self.operador)
         self.empresa_a = Empresa.objects.create(nombre="A", rut="76111111-6", direccion="d", encargado_personal="e")
         self.empresa_b = Empresa.objects.create(
             nombre="B", rut="76222222-1", direccion="d", encargado_personal="e", almuerzos_diarios=2
@@ -315,7 +334,7 @@ class EscanerManualYContadorTests(TestCase):
     def test_registro_manual_queda_marcado_y_respeta_cupo(self):
         def registrar():
             return self.client.post(
-                reverse("consumos:escaner"), {"trabajador_id": self.en_a.pk}, HTTP_X_REQUESTED_WITH="XMLHttpRequest"
+                reverse("consumos:escaner"), {"trabajador_id": self.en_a.pk, "mesa_id": self.mesa.pk}, HTTP_X_REQUESTED_WITH="XMLHttpRequest"
             ).json()
 
         primero = registrar()
@@ -328,7 +347,7 @@ class EscanerManualYContadorTests(TestCase):
 
     def test_registro_por_qr_queda_marcado_como_qr(self):
         response = self.client.post(
-            reverse("consumos:escaner"), {"token": str(self.en_b.token_qr)}, HTTP_X_REQUESTED_WITH="XMLHttpRequest"
+            reverse("consumos:escaner"), {"token": str(self.en_b.token_qr), "mesa_id": self.mesa.pk}, HTTP_X_REQUESTED_WITH="XMLHttpRequest"
         ).json()
         self.assertFalse(response["manual"])
         self.assertEqual(Consumo.objects.get(trabajador=self.en_b).metodo, Consumo.METODO_QR)
@@ -373,22 +392,31 @@ class ConsumoPorLocalTests(TestCase):
         self.trabajador = Trabajador.objects.create(
             nombre="Juan", apellido="Perez", rut="11111111-1", empresa=empresa
         )
+        from mesas.models import Mesa
+
+        Mesa.objects.create(local=self.norte, nombre="Mesa 1")
+        Mesa.objects.create(local=self.sur, nombre="Mesa 1")
 
     def escanear(self, usuario):
+        from mesas.models import Mesa
+        from operadores.models import local_de_usuario
+
         self.client.force_login(usuario)
+        mesa = Mesa.objects.filter(local=local_de_usuario(usuario)).first()
         return self.client.post(
             reverse("consumos:escaner"),
-            {"token": str(self.trabajador.token_qr)},
+            {"token": str(self.trabajador.token_qr), "mesa_id": mesa.pk if mesa else ""},
             HTTP_X_REQUESTED_WITH="XMLHttpRequest",
         ).json()
 
     def test_consumo_queda_en_el_local_de_quien_escanea(self):
         self.escanear(self.mozo_norte)
         self.escanear(self.mozo_sur)
-        self.escanear(self.admin)  # administrador sin local asignado
+        sin_local = self.escanear(self.admin)  # administrador sin local: no tiene mesas, no registra
 
         locales = list(Consumo.objects.order_by("numero").values_list("local__nombre", flat=True))
-        self.assertEqual(locales, ["Casino Norte", "Casino Sur", None])
+        self.assertEqual(locales, ["Casino Norte", "Casino Sur"])
+        self.assertEqual(sin_local["status"], "sin_mesa")
 
     def test_administrador_escanea_en_su_local(self):
         Administrador.objects.create(usuario=self.admin, local=self.sur)
@@ -432,6 +460,7 @@ class ConsumoPorLocalTests(TestCase):
         self.assertIsNone(operador.local)  # hay dos locales: no se puede saber cuál
 
         Operador.objects.exclude(pk=operador.pk).delete()
+        self.sur.mesas.all().delete()
         self.sur.delete()
         migracion.asignar_local_unico(apps, None)
         operador.refresh_from_db()
@@ -493,3 +522,65 @@ class AnulacionConsumoTests(TestCase):
         self.assertEqual(historial.context["total_anulados"], 1)
         self.assertContains(historial, "Anulado")
         self.assertContains(historial, "Prueba de anulación")
+
+
+class RevalidarMesaTests(TestCase):
+    """El escáner guarda la mesa en sessionStorage y la revalida al volver a abrirse."""
+
+    def setUp(self):
+        from mesas.models import Mesa
+
+        self.mozo = get_user_model().objects.create_user(username="mozo-mesa", password="x")
+        Operador.objects.create(usuario=self.mozo)
+        self.mesa = dar_mesa(self.mozo)
+        otro_local = Local.objects.create(nombre="Casino Sur", direccion="Calle 2")
+        self.mesa_ajena = Mesa.objects.create(local=otro_local, nombre="Mesa Sur")
+        self.url = reverse("consumos:revalidar_mesa")
+        self.client.force_login(self.mozo)
+
+    def revalidar(self, mesa_id):
+        return self.client.post(self.url, {"mesa_id": mesa_id}, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+
+    def test_mesa_activa_del_local_se_restaura(self):
+        respuesta = self.revalidar(self.mesa.pk)
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual(respuesta.json()["status"], "mesa")
+        self.assertEqual(respuesta.json()["table_id"], self.mesa.pk)
+        self.assertEqual(respuesta.json()["table"], "Mesa 1")
+
+    def test_mesa_inactiva_se_descarta(self):
+        self.mesa.activa = False
+        self.mesa.save(update_fields=["activa"])
+
+        respuesta = self.revalidar(self.mesa.pk)
+
+        self.assertEqual(respuesta.status_code, 409)
+        self.assertEqual(respuesta.json()["code"], "mesa_invalida")
+        self.assertIn("desactivada", respuesta.json()["message"])
+
+    def test_mesa_de_otro_local_se_descarta(self):
+        respuesta = self.revalidar(self.mesa_ajena.pk)
+
+        self.assertEqual(respuesta.status_code, 409)
+        self.assertEqual(respuesta.json()["code"], "mesa_invalida")
+        self.assertIn("no pertenece a tu local", respuesta.json()["message"])
+
+    def test_mesa_inexistente_o_vacia(self):
+        self.assertEqual(self.revalidar(999999).json()["code"], "mesa_invalida")
+        self.assertEqual(self.revalidar("abc").json()["code"], "mesa_invalida")
+        vacia = self.revalidar("")
+        self.assertEqual(vacia.status_code, 409)
+        self.assertEqual(vacia.json()["status"], "sin_mesa")
+
+    def test_no_registra_nada(self):
+        self.revalidar(self.mesa.pk)
+
+        self.assertFalse(Consumo.objects.exists())
+
+    def test_requiere_sesion_y_post(self):
+        self.assertEqual(self.client.get(self.url).status_code, 405)
+        self.client.logout()
+        respuesta = self.revalidar(self.mesa.pk)
+        self.assertEqual(respuesta.status_code, 302)
+        self.assertIn(reverse("login"), respuesta["Location"])

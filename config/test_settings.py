@@ -14,3 +14,7 @@ DATABASES = {
         "NAME": ":memory:",
     }
 }
+
+# EtiquetaMarmita usa una restricción única con nulls_distinct=False: PostgreSQL (producción
+# y pruebas de concurrencia) la aplica; SQLite no la soporta y solo avisa.
+SILENCED_SYSTEM_CHECKS = ["models.W047"]

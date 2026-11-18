@@ -80,7 +80,7 @@ def _cupo_del_dia(trabajador, fecha):
     return _Cupo(todos, vigentes, vigentes.count(), trabajador.cupo_diario)
 
 
-def _crear_consumo(trabajador, operador, fecha, metodo, cupo):
+def _crear_consumo(trabajador, operador, fecha, metodo, cupo, mesa=None):
     # El número siguiente se toma del máximo existente (no del conteo) para que un
     # hueco en la numeración no provoque una colisión y un falso «cupo agotado».
     ultimo_numero = cupo.todos_dia.aggregate(maximo=Max("numero"))["maximo"] or 0
@@ -92,6 +92,7 @@ def _crear_consumo(trabajador, operador, fecha, metodo, cupo):
         # El consumo queda en el local de quien escanea (operador o administrador).
         local=local_de_usuario(operador),
         metodo=metodo,
+        mesa=mesa,
     )
 
 
@@ -111,10 +112,11 @@ def estado_cupo(trabajador_id, fecha=None):
 
 # --- v0.1: registro sin menú -------------------------------------------------------------
 
-def registrar_consumo_diario(trabajador_id, operador, fecha=None, metodo=Consumo.METODO_QR):
+def registrar_consumo_diario(trabajador_id, operador, fecha=None, metodo=Consumo.METODO_QR, mesa=None):
     """Registra un almuerzo sin pedido (día sin menú publicado).
 
-    Si el cupo está agotado devuelve el último consumo del día con creado=False.
+    `mesa` es la mesa escaneada (el escáner la exige antes de llamar aquí; ver
+    validar_mesa). Si el cupo está agotado devuelve el último consumo del día con creado=False.
     """
     fecha = fecha or timezone.localdate()
     with transaction.atomic():
@@ -124,7 +126,7 @@ def registrar_consumo_diario(trabajador_id, operador, fecha=None, metodo=Consumo
             return ResultadoConsumo(cupo.vigentes_dia.order_by("-numero").first(), False, cupo.usados, cupo.cupo)
         try:
             with transaction.atomic():
-                consumo = _crear_consumo(trabajador, operador, fecha, metodo, cupo)
+                consumo = _crear_consumo(trabajador, operador, fecha, metodo, cupo, mesa)
         except IntegrityError:
             existente = cupo.vigentes_dia.order_by("-numero").first()
             if existente is None:
@@ -251,6 +253,30 @@ def _validar_porciones(lineas, token, ahora):
                 raise PedidoRechazado("porcion_agotada", f"{item.nombre}: agotado.", item.nombre)
 
 
+MENSAJE_SIN_MESA = "Escanea primero la mesa."
+
+
+def validar_mesa(mesa_id, local):
+    """Mesa activa del local de quien escanea. Se lee sin bloqueo.
+
+    En el local la mesa es obligatoria: sin ella no se toma ningún pedido ni se
+    registra ningún almuerzo (mesa_obligatoria).
+    """
+    from mesas.models import Mesa
+    from mesas.services import MesaInvalida, mesa_valida
+
+    if mesa_id in (None, ""):
+        raise PedidoRechazado("mesa_obligatoria", MENSAJE_SIN_MESA)
+    try:
+        mesa = Mesa.objects.filter(pk=int(mesa_id)).first()
+    except (TypeError, ValueError):
+        mesa = None
+    try:
+        return mesa_valida(mesa, local)
+    except MesaInvalida as error:
+        raise PedidoRechazado("mesa_invalida", error.mensaje)
+
+
 def _siguiente_folio(local, fecha):
     from pedidos.models import FolioDiario
 
@@ -275,13 +301,20 @@ def _mover_porcion(item, usuario, tipo, cantidad, pedido, motivo=""):
     )
 
 
-def registrar_pedido(trabajador_id, operador, token, seleccion, metodo=Consumo.METODO_QR, fecha=None):
+def registrar_pedido(
+    trabajador_id, operador, token, seleccion, metodo=Consumo.METODO_QR, fecha=None, mesa_id=None, despacho=False
+):
     """Confirma el pedido de un comensal: consumo + pedido + folio + ítems + movimientos.
+
+    En el local la mesa es obligatoria: `mesa_id` es la mesa activa en el escáner al
+    confirmar y debe estar activa y ser del local de quien escanea. `despacho=True` (sin
+    mesa) solo lo usa el servicio de despacho y solo con un administrador; si no, se
+    rechaza con despacho_no_permitido.
 
     Todo en una sola transacción; cualquier rechazo revierte todo (PedidoRechazado).
     Idempotente: el mismo `token` (token_seleccion) devuelve el mismo pedido sin crear otro.
     """
-    from pedidos.models import Pedido, PedidoItem
+    from pedidos.models import DESPACHO, Pedido, PedidoItem
 
     try:
         token = uuid.UUID(str(token))
@@ -315,17 +348,35 @@ def registrar_pedido(trabajador_id, operador, token, seleccion, metodo=Consumo.M
             menu = MenuDia.objects.filter(local=local, fecha=fecha, publicado=True).first() if local else None
             if menu is None:
                 raise PedidoRechazado("menu_no_publicado", "No hay menú publicado hoy en tu local.")
+            if despacho:
+                # Solo el servicio de despacho (pantalla de administrador) crea pedidos sin mesa.
+                if not (operador.is_authenticated and operador.is_staff):
+                    raise PedidoRechazado(
+                        "despacho_no_permitido", "Solo un administrador puede registrar pedidos de despacho."
+                    )
+                from pedidos.despacho import lista_abierta
+
+                if not lista_abierta(trabajador.empresa, local, fecha):
+                    raise PedidoRechazado(
+                        "lista_cerrada", "La lista de despacho ya cerró: no se pueden agregar pedidos."
+                    )
+                mesa = None
+            else:
+                mesa = validar_mesa(mesa_id, local)
 
             platos, acomps = _bloquear_items_seleccion(menu, pares)
             lineas = _validar_seleccion(menu, pares, platos, acomps)
             _validar_porciones(lineas, token, ahora)
 
-            consumo = _crear_consumo(trabajador, operador, fecha, metodo, cupo)
+            consumo = _crear_consumo(trabajador, operador, fecha, metodo, cupo, mesa)
             pedido = Pedido.objects.create(
                 consumo=consumo,
                 local=local,
                 fecha=fecha,
                 folio=_siguiente_folio(local, fecha),
+                mesa=mesa,
+                mesa_nombre=mesa.nombre if mesa else f"{DESPACHO} · {trabajador.empresa.nombre}"[:60],
+                es_despacho=despacho,
                 clave_idempotencia=token,
             )
             items = []

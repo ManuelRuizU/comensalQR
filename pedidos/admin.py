@@ -16,7 +16,7 @@ class PedidoAdmin(admin.ModelAdmin):
     """Solo consulta: los pedidos se crean, cambian y anulan mediante los servicios."""
 
     list_display = ("folio_texto", "fecha", "local", "mesa_nombre", "estado", "consumo")
-    list_filter = ("estado", "fecha", "local")
+    list_filter = ("estado", "fecha", "local", "mesa")
     inlines = [PedidoItemInline]
 
     def has_add_permission(self, request):

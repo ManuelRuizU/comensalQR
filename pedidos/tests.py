@@ -10,13 +10,28 @@ from django.urls import reverse
 from django.utils import timezone
 
 from consumos.models import Consumo
-from consumos.services import PedidoRechazado, anular_consumo, registrar_pedido
+from consumos.services import PedidoRechazado, anular_consumo
+from consumos.services import registrar_pedido as _registrar_pedido
 from menus import services as menu
 from menus.escenario_prueba import crear_escenario, nuevo_token
 from menus.models import MovimientoPorcion, ReservaPorcion
 
+from . import despacho
 from .models import FolioDiario, Pedido
 from .services import cambiar_plato
+
+
+def registrar_pedido(*args, **kwargs):
+    """En el local la mesa es obligatoria: por defecto se usa la mesa del escenario (la
+    primera mesa activa del local de quien registra). Solo las pruebas de despacho pasan
+    `despacho=True`, y las de mesa pasan `mesa_id` explícitamente."""
+    if "mesa_id" not in kwargs and not kwargs.get("despacho"):
+        from mesas.models import Mesa
+        from operadores.models import local_de_usuario
+
+        mesa = Mesa.objects.filter(local=local_de_usuario(args[1]), activa=True).order_by("id").first()
+        kwargs["mesa_id"] = mesa.pk if mesa else None
+    return _registrar_pedido(*args, **kwargs)
 
 
 def chuleta_con(e, acomp):
@@ -150,7 +165,7 @@ class RegistrarPedidoTests(TestCase):
 
         pedido = resultado.pedido
         self.assertTrue(resultado.creado)
-        self.assertEqual((pedido.folio, pedido.estado, pedido.mesa_nombre), (1, "pendiente", "Sin mesa"))
+        self.assertEqual((pedido.folio, pedido.estado, pedido.mesa_nombre), (1, "pendiente", "Mesa 1"))
         self.assertEqual(pedido.consumo.local, self.e.local)
         self.assertEqual([str(i) for i in pedido.items.all()], ["Chuleta de cerdo + Arroz", "Naranja"])
         self.e.chuleta.refresh_from_db(); self.e.arroz.refresh_from_db(); self.e.naranja.refresh_from_db()
@@ -367,7 +382,9 @@ class EscanerConMenuTests(TestCase):
         self.client.force_login(self.e.garzon_a)
 
     def escanear(self, **campos):
-        return self.client.post(reverse("consumos:escaner"), campos, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+        # El escáner envía siempre la mesa activa: aquí, la del escenario.
+        datos = {"mesa_id": self.e.mesa.pk, **campos}
+        return self.client.post(reverse("consumos:escaner"), datos, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
 
     def qr(self):
         return {"token": str(self.e.trabajador.token_qr)}
@@ -375,7 +392,7 @@ class EscanerConMenuTests(TestCase):
     def confirmar(self, token, seleccion, **campos):
         return self.client.post(
             reverse("consumos:confirmar"),
-            {**(campos or self.qr()), "selection_token": token, "seleccion": json.dumps(seleccion)},
+            {"mesa_id": self.e.mesa.pk, **(campos or self.qr()), "selection_token": token, "seleccion": json.dumps(seleccion)},
         )
 
     def test_escanear_abre_la_hoja_sin_registrar_nada(self):
@@ -393,7 +410,7 @@ class EscanerConMenuTests(TestCase):
 
         datos = self.confirmar(token, [chuleta_con(self.e, self.e.arroz)]).json()
 
-        self.assertEqual((datos["status"], datos["folio"], datos["message"]), ("registered", "0001", "Pedido 0001 · Sin mesa"))
+        self.assertEqual((datos["status"], datos["folio"], datos["message"]), ("registered", "0001", "Pedido 0001 · Mesa 1"))
         self.assertEqual(datos["items"], ["Chuleta de cerdo + Arroz"])
         self.assertEqual(Pedido.objects.get().consumo.metodo, Consumo.METODO_QR)
         # Reintento de red con la misma selección: mismo pedido, sin crear otro.
@@ -448,7 +465,7 @@ class EscanerConMenuTests(TestCase):
             [{"plato": self.e.chuleta.pk, "acompanamiento": self.e.pure.pk}, {"plato": self.e.naranja.pk, "acompanamiento": None}],
         )
 
-    def test_sin_menu_publicado_el_escaner_funciona_como_v01(self):
+    def test_sin_menu_publicado_registra_directo_con_la_mesa(self):
         self.e.menu.publicado = False
         self.e.menu.save()
 
@@ -457,17 +474,18 @@ class EscanerConMenuTests(TestCase):
         self.assertEqual((datos["status"], datos["message"]), ("registered", "Almuerzo 1 de 1 registrado."))
         consumo = Consumo.objects.get()
         self.assertFalse(Pedido.objects.exists())
-        self.assertEqual(consumo.local, self.e.local)
+        self.assertEqual((consumo.local, consumo.mesa), (self.e.local, self.e.mesa))
         self.assertEqual(self.escanear(**self.qr()).json()["status"], "duplicate")
 
-    def test_usuario_sin_local_escanea_como_v01(self):
+    def test_usuario_sin_local_no_registra_porque_no_tiene_mesas(self):
         from django.contrib.auth import get_user_model
 
         sin_local = get_user_model().objects.create_user(username="root", password="x", is_staff=True)
         self.client.force_login(sin_local)
 
-        self.assertEqual(self.escanear(**self.qr()).json()["status"], "registered")
-        self.assertFalse(Pedido.objects.exists())
+        respuesta = self.escanear(**self.qr())  # la mesa del escenario no es de su local
+        self.assertEqual((respuesta.status_code, respuesta.json()["code"]), (409, "mesa_invalida"))
+        self.assertFalse(Consumo.objects.exists())
 
     def test_disponibilidad_de_hoy_con_etag(self):
         url = reverse("menus:disponibilidad_hoy")
@@ -537,3 +555,749 @@ class PedidosDelDiaTests(TestCase):
 
         consumo.refresh_from_db()
         self.assertTrue(consumo.anulado)
+
+
+class MesaEnPedidoTests(TestCase):
+    def setUp(self):
+        from locales.models import Local
+        from mesas.models import Mesa
+
+        self.e = crear_escenario()
+        self.mesa = Mesa.objects.create(local=self.e.local, nombre="Mesa 3")
+        otro_local = Local.objects.create(nombre="Otro local", direccion="Calle 9")
+        self.mesa_ajena = Mesa.objects.create(local=otro_local, nombre="Mesa 3")
+
+    def pedir(self, mesa_id):
+        return registrar_pedido(
+            self.e.trabajador.pk, self.e.garzon_a, nuevo_token(), [{"plato": self.e.pollo.pk}], mesa_id=mesa_id
+        )
+
+    def test_el_pedido_guarda_la_mesa_activa(self):
+        pedido = self.pedir(self.mesa.pk).pedido
+
+        self.assertEqual((pedido.mesa, pedido.mesa_nombre), (self.mesa, "Mesa 3"))
+        # Renombrar la mesa después no altera el historial del pedido.
+        self.mesa.nombre = "Terraza 1"
+        self.mesa.save()
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.mesa_nombre, "Mesa 3")
+
+    def test_despacho_solo_con_administrador(self):
+        for pedir in (
+            lambda: _registrar_pedido(self.e.trabajador.pk, self.e.garzon_a, nuevo_token(), [{"plato": self.e.pollo.pk}], despacho=True),
+        ):
+            with self.assertRaises(PedidoRechazado) as error:
+                pedir()
+            self.assertEqual(error.exception.codigo, "despacho_no_permitido")
+        self.assertFalse(Consumo.objects.exists())
+
+        import datetime
+
+        antes_del_cierre = timezone.make_aware(datetime.datetime.combine(timezone.localdate(), datetime.time(8, 0)))
+        with patch("django.utils.timezone.now", return_value=antes_del_cierre):  # no depende del reloj real
+            pedido = _registrar_pedido(
+                self.e.trabajador.pk, self.e.admin, nuevo_token(), [{"plato": self.e.pollo.pk}], despacho=True
+            ).pedido
+        self.assertIsNone(pedido.mesa)
+        self.assertIsNone(pedido.consumo.mesa)
+        self.assertTrue(pedido.es_despacho)
+        self.assertEqual(pedido.mesa_nombre, "Despacho · Constructora ABC")
+
+    def test_la_regla_aplica_tambien_al_administrador(self):
+        with self.assertRaises(PedidoRechazado) as error:
+            _registrar_pedido(self.e.trabajador.pk, self.e.admin, nuevo_token(), [{"plato": self.e.pollo.pk}])
+        self.assertEqual(error.exception.codigo, "mesa_obligatoria")
+
+    def test_mesa_inactiva_o_de_otro_local_se_rechaza_sin_crear_nada(self):
+        self.mesa.activa = False
+        self.mesa.save()
+        for mesa_id in (self.mesa.pk, self.mesa_ajena.pk, 999999, "x"):
+            with self.assertRaises(PedidoRechazado) as error:
+                self.pedir(mesa_id)
+            self.assertEqual(error.exception.codigo, "mesa_invalida")
+        self.assertFalse(Consumo.objects.exists())
+        self.assertFalse(FolioDiario.objects.exists())
+        self.e.pollo.refresh_from_db()
+        self.assertEqual(self.e.pollo.vendidas, 0)
+
+
+class EscanerModoMesaTests(TestCase):
+    def setUp(self):
+        from locales.models import Local
+        from mesas.models import Mesa
+
+        self.e = crear_escenario()
+        self.mesa = Mesa.objects.create(local=self.e.local, nombre="Mesa 3")
+        self.inactiva = Mesa.objects.create(local=self.e.local, nombre="Mesa 4", activa=False)
+        self.ajena = Mesa.objects.create(local=Local.objects.create(nombre="Otro", direccion="X"), nombre="Mesa 1")
+        self.client.force_login(self.e.garzon_a)
+
+    def escanear(self, contenido, **modo):
+        return self.client.post(
+            reverse("consumos:escaner"), {"token": contenido, **modo}, HTTP_X_REQUESTED_WITH="XMLHttpRequest"
+        )
+
+    def test_comensal_sin_mesa_no_abre_la_hoja_ni_registra(self):
+        for publicado in (True, False):  # con y sin menú
+            self.e.menu.publicado = publicado
+            self.e.menu.save()
+            for campos in ({"token": str(self.e.trabajador.token_qr)}, {"trabajador_id": str(self.e.trabajador.pk)}):
+                respuesta = self.client.post(reverse("consumos:escaner"), campos, HTTP_X_REQUESTED_WITH="XMLHttpRequest")
+                self.assertEqual(respuesta.status_code, 409)
+                self.assertEqual(
+                    (respuesta.json()["status"], respuesta.json()["message"]), ("sin_mesa", "Escanea primero la mesa.")
+                )
+        self.assertFalse(ReservaPorcion.objects.exists())
+        self.assertFalse(Consumo.objects.exists())
+
+    def test_confirmar_sin_mesa_ni_despacho_se_rechaza(self):
+        respuesta = self.client.post(reverse("consumos:confirmar"), {
+            "token": str(self.e.trabajador.token_qr), "selection_token": str(nuevo_token()),
+            "seleccion": json.dumps([{"plato": self.e.pollo.pk}]),
+        })
+        self.assertEqual((respuesta.status_code, respuesta.json()["code"]), (409, "mesa_obligatoria"))
+        self.assertFalse(Pedido.objects.exists())
+
+    def test_el_escaner_no_acepta_despacho(self):
+        # Un garzón no puede saltarse la mesa pidiendo «despacho»: el escáner ignora ese campo.
+        respuesta = self.client.post(reverse("consumos:confirmar"), {
+            "trabajador_id": str(self.e.trabajador.pk), "despacho": "1", "selection_token": str(nuevo_token()),
+            "seleccion": json.dumps([{"plato": self.e.pollo.pk}]),
+        })
+        self.assertEqual((respuesta.status_code, respuesta.json()["code"]), (409, "mesa_obligatoria"))
+        self.assertFalse(Pedido.objects.exists())
+
+    def test_escanear_comensal_con_mesa_inactiva_no_abre_la_hoja(self):
+        respuesta = self.escanear(str(self.e.trabajador.token_qr), mesa_id=self.inactiva.pk)
+        self.assertEqual((respuesta.status_code, respuesta.json()["code"]), (409, "mesa_invalida"))
+
+    def test_escanear_mesa_activa_el_modo_mesa(self):
+        datos = self.escanear(self.mesa.token).json()
+
+        self.assertEqual((datos["status"], datos["table_id"], datos["table"]), ("mesa", self.mesa.pk, "Mesa 3"))
+        self.assertFalse(Consumo.objects.exists())
+
+    def test_qr_de_mesa_inactiva_o_de_otro_local_es_rechazado(self):
+        for mesa, motivo in ((self.inactiva, "desactivada"), (self.ajena, "no pertenece a tu local")):
+            respuesta = self.escanear(mesa.token)
+            self.assertEqual(respuesta.status_code, 400)
+            self.assertEqual(respuesta.json()["code"], "mesa_invalida")
+            self.assertIn(motivo, respuesta.json()["message"])
+
+    def test_qr_que_no_es_trabajador_ni_mesa_sigue_siendo_invalido(self):
+        respuesta = self.escanear("cualquier-cosa")
+        self.assertEqual((respuesta.status_code, respuesta.json()["message"]), (400, "QR no válido."))
+
+    def test_confirmar_guarda_la_mesa_activa_y_el_resultado_la_muestra(self):
+        datos = self.escanear(str(self.e.trabajador.token_qr), mesa_id=self.mesa.pk).json()
+        respuesta = self.client.post(reverse("consumos:confirmar"), {
+            "token": str(self.e.trabajador.token_qr), "selection_token": datos["selection_token"],
+            "seleccion": json.dumps([{"plato": self.e.pollo.pk}]), "mesa_id": self.mesa.pk,
+        }).json()
+
+        self.assertEqual(respuesta["message"], "Pedido 0001 · Mesa 3")
+        self.assertEqual(Pedido.objects.get().mesa, self.mesa)
+
+    def test_confirmar_con_mesa_desactivada_entre_medio_no_crea_nada(self):
+        datos = self.escanear(str(self.e.trabajador.token_qr), mesa_id=self.mesa.pk).json()
+        self.mesa.activa = False
+        self.mesa.save()
+        respuesta = self.client.post(reverse("consumos:confirmar"), {
+            "token": str(self.e.trabajador.token_qr), "selection_token": datos["selection_token"],
+            "seleccion": json.dumps([{"plato": self.e.pollo.pk}]), "mesa_id": self.mesa.pk,
+        })
+
+        self.assertEqual((respuesta.status_code, respuesta.json()["code"]), (409, "mesa_invalida"))
+        self.assertFalse(Pedido.objects.exists())
+
+    def test_sin_menu_tambien_se_escanea_la_mesa_y_queda_en_el_consumo(self):
+        self.e.menu.publicado = False
+        self.e.menu.save()
+
+        self.assertEqual(self.escanear(self.mesa.token).json()["status"], "mesa")
+        datos = self.escanear(str(self.e.trabajador.token_qr), mesa_id=self.mesa.pk).json()
+
+        self.assertEqual((datos["status"], datos["table"]), ("registered", "Mesa 3"))
+        self.assertEqual(Consumo.objects.get().mesa, self.mesa)
+        self.assertFalse(Pedido.objects.exists())
+
+    def test_pantalla_pide_la_mesa_con_y_sin_menu(self):
+        for publicado in (True, False):
+            self.e.menu.publicado = publicado
+            self.e.menu.save()
+            pantalla = self.client.get(reverse("consumos:escaner"))
+            self.assertContains(pantalla, "Escanea la mesa")
+            self.assertNotContains(pantalla, "btn-despacho")
+            self.assertNotContains(pantalla, "no tiene mesas activas")
+
+    def test_aviso_si_el_local_no_tiene_mesas_activas(self):
+        from mesas.models import Mesa
+
+        Mesa.objects.filter(local=self.e.local).update(activa=False)
+        self.assertContains(self.client.get(reverse("consumos:escaner")), "no tiene mesas activas")
+
+
+
+class HistorialConPedidoTests(TestCase):
+    def setUp(self):
+        from mesas.models import Mesa
+
+        self.e = crear_escenario()
+        self.mesa = Mesa.objects.create(local=self.e.local, nombre="Mesa 3")
+
+    def test_historial_muestra_folio_y_mesa(self):
+        registrar_pedido(self.e.trabajador.pk, self.e.garzon_a, nuevo_token(), [{"plato": self.e.pollo.pk}], mesa_id=self.mesa.pk)
+        registrar_pedido(self.e.otro.pk, self.e.garzon_a, nuevo_token(), [{"plato": self.e.pollo.pk}])
+
+        for usuario in (self.e.admin, self.e.garzon_a):  # el garzón ve el día en curso
+            self.client.force_login(usuario)
+            historial = self.client.get(reverse("consumos:historial"))
+            self.assertContains(historial, "0001</span> · Mesa 3")
+            self.assertContains(historial, "0002</span> · Mesa 1")
+
+    def test_consumo_sin_pedido_muestra_guion(self):
+        from consumos.services import registrar_consumo_diario
+
+        self.e.menu.publicado = False
+        self.e.menu.save()
+        registrar_consumo_diario(self.e.trabajador.pk, self.e.garzon_a)
+        self.client.force_login(self.e.admin)
+
+        historial = self.client.get(reverse("consumos:historial"))
+        self.assertContains(historial, '<span class="text-secondary">—</span>')
+
+    def _dos_pedidos(self):
+        """Javier en Mesa 3 (garzón A, chuleta con puré y naranja); Ana en Mesa 1 (garzón B, pollo)."""
+        seleccion = [chuleta_con(self.e, self.e.pure), {"plato": self.e.naranja.pk}]
+        javier = registrar_pedido(self.e.trabajador.pk, self.e.garzon_a, nuevo_token(), seleccion, mesa_id=self.mesa.pk)
+        ana = registrar_pedido(self.e.otro.pk, self.e.garzon_b, nuevo_token(), [{"plato": self.e.pollo.pk}])
+        return javier.pedido.consumo, ana.pedido.consumo
+
+    def _filas(self, usuario, **filtros):
+        self.client.force_login(usuario)
+        respuesta = self.client.get(reverse("consumos:historial"), filtros)
+        return respuesta, list(respuesta.context["consumos"])
+
+    def test_filtrar_por_mesa_devuelve_solo_esa_mesa(self):
+        javier, ana = self._dos_pedidos()
+
+        for usuario in (self.e.admin, self.e.garzon_a):
+            _, filas = self._filas(usuario, mesa=self.mesa.pk)
+            self.assertEqual(filas, [javier])
+            _, filas = self._filas(usuario, mesa=self.e.mesa.pk)
+            self.assertEqual(filas, [ana])
+
+    def test_filtrar_por_mesa_incluye_pedidos_con_la_mesa_solo_en_el_pedido(self):
+        # Pedidos anteriores a que el consumo guardara la mesa: la tienen solo en el pedido.
+        javier, _ = self._dos_pedidos()
+        Consumo.objects.filter(pk=javier.pk).update(mesa=None)
+
+        _, filas = self._filas(self.e.admin, mesa=self.mesa.pk)
+
+        self.assertEqual(filas, [javier])
+
+    def test_filtrar_por_garzon_devuelve_solo_lo_que_registro(self):
+        javier, ana = self._dos_pedidos()
+
+        for usuario in (self.e.admin, self.e.garzon_a):
+            _, filas = self._filas(usuario, garzon=self.e.garzon_b.pk)
+            self.assertEqual(filas, [ana])
+            _, filas = self._filas(usuario, garzon=self.e.garzon_a.pk)
+            self.assertEqual(filas, [javier])
+
+    def test_el_garzon_sigue_viendo_solo_su_jornada(self):
+        from consumos.services import registrar_consumo_diario
+
+        ayer = timezone.localdate() - timedelta(days=1)
+        registrar_consumo_diario(self.e.trabajador.pk, self.e.garzon_a, fecha=ayer, mesa=self.mesa)
+        javier, _ = self._dos_pedidos()
+
+        _, filas = self._filas(self.e.garzon_a, mesa=self.mesa.pk, fecha=ayer.isoformat())
+        self.assertEqual(filas, [javier])
+        _, filas = self._filas(self.e.admin, mesa=self.mesa.pk, fecha=ayer.isoformat())
+        self.assertEqual(len(filas), 1)
+        self.assertEqual(filas[0].fecha, ayer)
+
+    def test_filtros_de_mesa_y_garzon_en_pantalla(self):
+        self._dos_pedidos()
+
+        respuesta, _ = self._filas(self.e.garzon_a)
+
+        self.assertContains(respuesta, 'name="mesa"')
+        self.assertContains(respuesta, 'name="garzon"')
+        self.assertContains(respuesta, ">Mesa 3</option>")
+        self.assertContains(respuesta, ">garzon.b</option>")
+
+    def test_muestra_los_platos_de_cada_pedido(self):
+        self._dos_pedidos()
+
+        respuesta, _ = self._filas(self.e.admin)
+
+        self.assertContains(respuesta, "Chuleta de cerdo + Puré · Naranja")
+        self.assertContains(respuesta, "Pollo asado</div>")
+
+    def test_platos_sin_una_consulta_por_fila(self):
+        from trabajadores.models import Trabajador
+
+        self._dos_pedidos()
+        self.client.force_login(self.e.admin)
+        base = self._consultas_historial()
+        for rut in ("33333333-3", "44444444-4", "55555555-5"):
+            t = Trabajador.objects.create(nombre="Extra", apellido=rut[:2], rut=rut, empresa=self.e.empresa)
+            registrar_pedido(t.pk, self.e.garzon_a, nuevo_token(), [chuleta_con(self.e, self.e.arroz), {"plato": self.e.naranja.pk}])
+
+        self.assertEqual(self._consultas_historial(), base)
+
+    def _consultas_historial(self):
+        from django.test.utils import CaptureQueriesContext
+
+        with CaptureQueriesContext(connection) as consultas:
+            self.client.get(reverse("consumos:historial"))
+        return len(consultas)
+
+
+class EtiquetaYConfiguracionDespachoTests(TestCase):
+    def setUp(self):
+        self.e = crear_escenario(cupo=2)
+
+    def test_token_de_etiqueta_unico_y_distinto_del_qr_del_trabajador(self):
+        a = registrar_pedido(self.e.trabajador.pk, self.e.garzon_a, nuevo_token(), [{"plato": self.e.pollo.pk}]).pedido
+        b = registrar_pedido(self.e.trabajador.pk, self.e.garzon_a, nuevo_token(), [{"plato": self.e.pollo.pk}]).pedido
+
+        self.assertEqual(len(a.token_etiqueta), 43)
+        self.assertNotEqual(a.token_etiqueta, b.token_etiqueta)
+        self.assertNotIn(str(self.e.trabajador.token_qr), (a.token_etiqueta, b.token_etiqueta))
+        self.assertFalse(a.es_despacho)
+
+    def test_migracion_rellena_un_token_distinto_por_pedido(self):
+        from importlib import import_module
+
+        from django.apps import apps
+
+        for _ in range(2):
+            registrar_pedido(self.e.trabajador.pk, self.e.garzon_a, nuevo_token(), [{"plato": self.e.pollo.pk}])
+        antes = set(Pedido.objects.values_list("token_etiqueta", flat=True))
+        migracion = import_module("pedidos.migrations.0003_despacho_y_etiqueta")
+        migracion.rellenar_tokens(apps, None)  # solo rellena los vacíos: no cambia los existentes
+
+        self.assertEqual(set(Pedido.objects.values_list("token_etiqueta", flat=True)), antes)
+        self.assertEqual(len(antes), 2)
+
+    def test_configuracion_de_cierre_y_envase(self):
+        import datetime
+
+        self.assertEqual(self.e.local.hora_cierre_despacho, datetime.time(10, 0))
+        empresa = self.e.trabajador.empresa
+        self.assertIsNone(empresa.hora_cierre_despacho)
+        self.assertEqual(empresa.tipo_envase, "individual")
+
+        self.client.force_login(self.e.admin)
+        self.client.post(reverse("empresas:editar", args=[empresa.pk]), {
+            "rut": empresa.rut, "nombre": empresa.nombre, "direccion": empresa.direccion,
+            "encargado_personal": empresa.encargado_personal, "almuerzos_diarios": 2,
+            "hora_cierre_despacho": "09:30", "tipo_envase": "marmita", "activa": "on",
+        })
+        self.client.post(reverse("locales:editar", args=[self.e.local.pk]), {
+            "nombre": self.e.local.nombre, "direccion": self.e.local.direccion,
+            "hora_cierre_despacho": "11:15", "activo": "on",
+        })
+        empresa.refresh_from_db(); self.e.local.refresh_from_db()
+        self.assertEqual((empresa.hora_cierre_despacho, empresa.tipo_envase), (datetime.time(9, 30), "marmita"))
+        self.assertEqual(self.e.local.hora_cierre_despacho, datetime.time(11, 15))
+
+
+class DespachoServicioTests(TestCase):
+    """Lista nominal de despacho: solo administrador, antes del cierre, éxito parcial."""
+
+    def setUp(self):
+        from trabajadores.models import Trabajador
+
+        self.e = crear_escenario()
+        self.empresa = self.e.trabajador.empresa
+        self.e.pollo.porciones = None  # sin límite: estas pruebas miden cupo y cierre
+        self.e.pollo.save()
+        for i in range(28):  # 30 trabajadores en la empresa (incluye los 2 del escenario)
+            Trabajador.objects.create(nombre=f"T{i:02d}", apellido="Despacho", rut=_rut_valido(30000000 + i), empresa=self.empresa)
+        self.hoy = timezone.localdate()
+
+    def a_las(self, hora, minuto=0):
+        import datetime
+
+        momento = timezone.make_aware(datetime.datetime.combine(self.hoy, datetime.time(hora, minuto)))
+        return patch("django.utils.timezone.now", return_value=momento)
+
+    def filas(self, trabajadores=None):
+        trabajadores = trabajadores or self.empresa.trabajadores.filter(eliminado_en__isnull=True)
+        return [{"trabajador": t, "token": nuevo_token(), "seleccion": [{"plato": self.e.pollo.pk}]} for t in trabajadores]
+
+    def test_lista_de_30_con_uno_sin_cupo_crea_29_e_informa_1(self):
+        with self.a_las(8):
+            registrar_pedido(self.e.otro.pk, self.e.garzon_a, nuevo_token(), [{"plato": self.e.pollo.pk}])  # ya almorzó
+            resultado = despacho.confirmar_lista(self.e.admin, self.empresa, self.hoy, self.filas())
+
+        self.assertEqual((len(resultado.creados), resultado.total_errores), (29, 1))
+        trabajador, codigo, mensaje = resultado.errores[0]
+        self.assertEqual((trabajador, codigo), (self.e.otro, "cupo_agotado"))
+        self.assertIn("Cupo diario agotado", mensaje)
+        pedidos = despacho.pedidos_de_despacho(self.empresa, self.e.local, self.hoy)
+        self.assertEqual(pedidos.count(), 29)
+        self.assertTrue(all(p.es_despacho and p.mesa is None for p in pedidos))
+        self.assertEqual({p.mesa_nombre for p in pedidos}, {"Despacho · Constructora ABC"})
+        self.assertEqual(sorted(p.folio for p in pedidos), list(range(2, 31)))  # el folio 1 fue el del local
+
+    def test_operador_no_puede_crear_pedidos_de_despacho(self):
+        from django.core.exceptions import PermissionDenied
+
+        with self.a_las(8):
+            with self.assertRaises(PermissionDenied):
+                despacho.confirmar_lista(self.e.garzon_a, self.empresa, self.hoy, self.filas())
+            with self.assertRaises(PedidoRechazado) as error:
+                _registrar_pedido(self.e.trabajador.pk, self.e.garzon_a, nuevo_token(), [{"plato": self.e.pollo.pk}], despacho=True)
+        self.assertEqual(error.exception.codigo, "despacho_no_permitido")
+        self.assertFalse(Pedido.objects.exists())
+
+    def test_despues_del_cierre_no_se_agrega_ni_cambia_solo_se_anula(self):
+        with self.a_las(9, 59):
+            resultado = despacho.confirmar_lista(self.e.admin, self.empresa, self.hoy, self.filas([self.e.trabajador]))
+        pedido = resultado.creados[0]
+
+        with self.a_las(10):
+            with self.assertRaises(despacho.ErrorDespacho) as error:
+                despacho.confirmar_lista(self.e.admin, self.empresa, self.hoy, self.filas([self.e.otro]))
+            self.assertEqual(error.exception.codigo, "lista_cerrada")
+            with self.assertRaises(PedidoRechazado) as directo:
+                _registrar_pedido(self.e.otro.pk, self.e.admin, nuevo_token(), [{"plato": self.e.pollo.pk}], despacho=True)
+            self.assertEqual(directo.exception.codigo, "lista_cerrada")
+            with self.assertRaises(PedidoRechazado) as cambio:
+                cambiar_plato(pedido.items.get().pk, self.e.chuleta.pk, self.e.arroz.pk, self.e.admin)
+            self.assertEqual(cambio.exception.codigo, "lista_cerrada")
+            anular_consumo(pedido.consumo_id, self.e.admin, "El trabajador avisó tarde que no venía")
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.estado, Pedido.ANULADO)
+
+    def test_la_excepcion_de_la_empresa_manda_sobre_el_local(self):
+        import datetime
+
+        self.empresa.hora_cierre_despacho = datetime.time(9, 0)
+        self.empresa.save()
+        with self.a_las(9, 30), self.assertRaises(despacho.ErrorDespacho):
+            despacho.confirmar_lista(self.e.admin, self.empresa, self.hoy, self.filas([self.e.trabajador]))
+
+        self.empresa.hora_cierre_despacho = datetime.time(11, 0)
+        self.empresa.save()
+        with self.a_las(10, 30):  # el local ya cerró (10:00), pero esta empresa cierra a las 11:00
+            resultado = despacho.confirmar_lista(self.e.admin, self.empresa, self.hoy, self.filas([self.e.trabajador]))
+        self.assertEqual(len(resultado.creados), 1)
+
+    def test_antes_del_cierre_se_cambia_plato_y_se_quita_trabajador(self):
+        with self.a_las(8):
+            resultado = despacho.confirmar_lista(
+                self.e.admin, self.empresa, self.hoy, self.filas([self.e.trabajador, self.e.otro])
+            )
+            uno, otro = resultado.creados
+            cambiar_plato(uno.items.get().pk, self.e.chuleta.pk, self.e.arroz.pk, self.e.admin)
+            quitado = despacho.confirmar_lista(self.e.admin, self.empresa, self.hoy, [], quitar=[otro])
+
+        uno.refresh_from_db(); otro.refresh_from_db()
+        self.assertEqual(str(uno.items.get()), "Chuleta de cerdo + Arroz")
+        self.assertEqual(len(quitado.quitados), 1)
+        self.assertEqual((otro.estado, otro.consumo.motivo_anulacion), (Pedido.ANULADO, despacho.MOTIVO_QUITADO))
+        self.assertEqual(despacho.pedidos_de_despacho(self.empresa, self.e.local, self.hoy).count(), 1)
+
+    def test_reintento_de_la_misma_lista_no_duplica(self):
+        filas = self.filas([self.e.trabajador])
+        with self.a_las(8):
+            despacho.confirmar_lista(self.e.admin, self.empresa, self.hoy, filas)
+            segundo = despacho.confirmar_lista(self.e.admin, self.empresa, self.hoy, filas)
+        self.assertEqual((len(segundo.creados), len(segundo.sin_cambios)), (0, 1))
+        self.assertEqual(Pedido.objects.count(), 1)
+
+    def test_totales_por_plato(self):
+        with self.a_las(8):
+            filas = self.filas([self.e.trabajador, self.e.otro])
+            filas[1]["seleccion"] = [chuleta_con(self.e, self.e.arroz)]
+            despacho.confirmar_lista(self.e.admin, self.empresa, self.hoy, filas)
+        pedidos = despacho.pedidos_de_despacho(self.empresa, self.e.local, self.hoy)
+        self.assertEqual(despacho.totales_por_plato(pedidos), [("Chuleta de cerdo + Arroz", 1), ("Pollo asado", 1)])
+
+
+def _rut_valido(cuerpo):
+    suma, factor = 0, 2
+    for digito in reversed(str(cuerpo)):
+        suma += int(digito) * factor
+        factor = 2 if factor == 7 else factor + 1
+    resto = 11 - (suma % 11)
+    return f"{cuerpo}-{'0' if resto == 11 else 'K' if resto == 10 else resto}"
+
+
+class PantallaDespachoTests(TestCase):
+    def setUp(self):
+        self.e = crear_escenario()
+        self.empresa = self.e.trabajador.empresa
+        self.client.force_login(self.e.admin)
+        self.hoy = timezone.localdate()
+        self.url = reverse("despacho:lista") + f"?empresa={self.empresa.pk}&fecha={self.hoy:%Y-%m-%d}"
+
+    def a_las(self, hora, minuto=0):
+        import datetime
+
+        momento = timezone.make_aware(datetime.datetime.combine(self.hoy, datetime.time(hora, minuto)))
+        return patch("django.utils.timezone.now", return_value=momento)
+
+    def enviar(self, **lista):
+        return self.client.post(
+            reverse("despacho:confirmar"),
+            {"empresa": self.empresa.pk, "fecha": self.hoy.isoformat(), "lista": json.dumps(lista)},
+            follow=True,
+        )
+
+    def test_pantalla_lista_a_los_trabajadores_activos_con_el_menu(self):
+        with self.a_las(8):
+            pantalla = self.client.get(self.url)
+        self.assertContains(pantalla, "Lista abierta hasta las <strong>10:00</strong>")
+        nombres = [f["nombre"] for f in pantalla.context["datos"]["filas"]]
+        self.assertEqual(sorted(nombres), ["Ana Soto", "Javier Cid"])
+        self.assertEqual(pantalla.context["datos"]["menu"]["menu_id"], self.e.menu.pk)
+
+    def test_confirmar_crea_informa_fallidos_cambia_y_quita(self):
+        with self.a_las(8):
+            registrar_pedido(self.e.otro.pk, self.e.garzon_a, nuevo_token(), [{"plato": self.e.pollo.pk}])  # Ana ya almorzó
+            respuesta = self.enviar(nuevos=[
+                {"trabajador": self.e.trabajador.pk, "token": str(nuevo_token()), "seleccion": [chuleta_con(self.e, self.e.pure)]},
+                {"trabajador": self.e.otro.pk, "token": str(nuevo_token()), "seleccion": [{"plato": self.e.pollo.pk}]},
+            ])
+        textos = [str(m) for m in respuesta.context["messages"]]
+        self.assertIn("1 pedido(s) registrado(s).", textos)
+        self.assertTrue(any(t.startswith("No se registró a Ana Soto: Cupo diario agotado") for t in textos))
+
+        pedido = Pedido.objects.get(es_despacho=True)
+        with self.a_las(9):
+            self.enviar(cambios=[{"item": pedido.items.get().pk, "plato": self.e.chuleta.pk, "acompanamiento": self.e.arroz.pk}])
+            pedido.refresh_from_db()
+            self.assertEqual(str(pedido.items.get()), "Chuleta de cerdo + Arroz")
+            self.enviar(quitar=[pedido.pk])
+        pedido.refresh_from_db()
+        self.assertEqual(pedido.estado, Pedido.ANULADO)
+
+    def test_despues_del_cierre_la_pantalla_queda_fija(self):
+        with self.a_las(10, 1):
+            pantalla = self.client.get(self.url)
+            respuesta = self.enviar(nuevos=[{"trabajador": self.e.trabajador.pk, "token": str(nuevo_token()), "seleccion": [{"plato": self.e.pollo.pk}]}])
+        self.assertContains(pantalla, "Lista cerrada a las <strong>10:00</strong>")
+        self.assertNotContains(pantalla, 'id="btn-confirmar-lista"')
+        self.assertTrue(any("cerró a las 10:00" in str(m) for m in respuesta.context["messages"]))
+        self.assertFalse(Pedido.objects.exists())
+
+    def test_operador_no_entra_ni_confirma(self):
+        self.client.force_login(self.e.garzon_a)
+        self.assertEqual(self.client.get(self.url).status_code, 302)
+        with self.a_las(8):
+            self.client.post(reverse("despacho:confirmar"), {
+                "empresa": self.empresa.pk, "fecha": self.hoy.isoformat(),
+                "lista": json.dumps({"nuevos": [{"trabajador": self.e.trabajador.pk, "token": str(nuevo_token()), "seleccion": [{"plato": self.e.pollo.pk}]}]}),
+            })
+        self.assertFalse(Pedido.objects.exists())
+
+
+class DocumentosDespachoTests(TestCase):
+    def setUp(self):
+        import datetime
+
+        from trabajadores.models import Trabajador
+
+        self.e = crear_escenario()
+        self.empresa = self.e.trabajador.empresa
+        self.e.local.hora_cierre_despacho = datetime.time(23, 59, 59)
+        self.e.local.save()
+        self.e.pollo.porciones = None
+        self.e.pollo.save()
+        self.tercero = Trabajador.objects.create(nombre="Luis", apellido="Rojas", rut="33333333-3", empresa=self.empresa)
+        self.hoy = timezone.localdate()
+        filas = [
+            {"trabajador": self.e.trabajador, "token": nuevo_token(), "seleccion": [{"plato": self.e.pollo.pk}, {"plato": self.e.naranja.pk}]},
+            {"trabajador": self.e.otro, "token": nuevo_token(), "seleccion": [{"plato": self.e.pollo.pk}]},
+            {"trabajador": self.tercero, "token": nuevo_token(), "seleccion": [chuleta_con(self.e, self.e.arroz)]},
+        ]
+        a_las_8 = timezone.make_aware(datetime.datetime.combine(self.hoy, datetime.time(8, 0)))
+        with patch("django.utils.timezone.now", return_value=a_las_8):  # no depende del reloj real
+            self.resultado = despacho.confirmar_lista(self.e.admin, self.empresa, self.hoy, filas)
+        self.client.force_login(self.e.admin)
+        self.params = {"empresa": self.empresa.pk, "fecha": self.hoy.isoformat()}
+
+    def etiquetas(self):
+        from . import documentos
+
+        with patch.object(documentos, "qr_svg", wraps=documentos.qr_svg) as qr:
+            pagina = self.client.get(reverse("despacho:etiquetas"), self.params)
+        return pagina, [llamada.args[0] for llamada in qr.call_args_list]
+
+    def test_etiquetas_individuales_una_por_pedido_con_su_token(self):
+        pagina, contenidos = self.etiquetas()
+
+        tokens = {p.token_etiqueta for p in self.resultado.creados}
+        self.assertEqual(set(contenidos), tokens)
+        self.assertEqual(len(pagina.context["etiquetas"]), 3)
+        self.assertContains(pagina, "Javier Cid")
+        self.assertContains(pagina, "Pollo asado")
+        self.assertContains(pagina, "Folio 0001")
+
+    def test_nunca_se_imprime_el_qr_del_trabajador(self):
+        from trabajadores.models import Trabajador
+
+        qr_trabajadores = {str(t) for t in Trabajador.objects.values_list("token_qr", flat=True)}
+        for tipo in ("individual", "marmita"):
+            self.empresa.tipo_envase = tipo
+            self.empresa.save()
+            pagina, contenidos = self.etiquetas()
+            self.assertFalse(qr_trabajadores & set(contenidos), tipo)
+            for token in qr_trabajadores:
+                self.assertNotContains(pagina, token)
+        guia = self.client.get(reverse("despacho:guia"), self.params)
+        for token in qr_trabajadores:
+            self.assertNotContains(guia, token)
+
+    def test_marmita_una_por_plato_con_cantidad_y_hoja_de_reparto(self):
+        self.empresa.tipo_envase = "marmita"
+        self.empresa.save()
+
+        pagina, contenidos = self.etiquetas()
+        marmitas = {m["nombre"]: m for m in pagina.context["marmitas"]}
+
+        self.assertEqual({n: m["cantidad"] for n, m in marmitas.items()}, {"Pollo asado": 2, "Naranja": 1, "Chuleta de cerdo + Arroz": 1})
+        self.assertEqual(marmitas["Pollo asado"]["trabajadores"], ["Ana Soto", "Javier Cid"])
+        self.assertContains(pagina, "Pollo asado × 2")
+        self.assertContains(pagina, "Hoja de reparto")
+        # Reimprimir conserva los mismos tokens de marmita.
+        _, otra_vez = self.etiquetas()
+        self.assertEqual(set(contenidos), set(otra_vez))
+
+    def test_la_guia_cuadra_con_los_pedidos(self):
+        anulado = self.resultado.creados[1]
+        anular_consumo(anulado.consumo_id, self.e.admin, "No viene hoy")
+
+        guia = self.client.get(reverse("despacho:guia"), self.params)
+        vigentes = despacho.pedidos_de_despacho(self.empresa, self.e.local, self.hoy)
+
+        filas = guia.context["filas"]
+        self.assertEqual([(f["nombre"], f["folio"]) for f in filas], [(str(p.consumo.trabajador), p.folio_texto) for p in vigentes])
+        self.assertEqual(guia.context["total"], 2)
+        totales = dict(guia.context["totales"])
+        self.assertEqual(totales, {"Pollo asado": 1, "Naranja": 1, "Chuleta de cerdo + Arroz": 1})
+        self.assertEqual(sum(totales.values()), sum(len(f["lineas"]) for f in filas))
+        self.assertNotContains(guia, "Ana Soto")
+        self.assertContains(guia, "Firma")
+
+    def test_la_guia_muestra_codigo_solo_si_la_empresa_lo_usa(self):
+        self.e.trabajador.codigo_interno = "C-0042"
+        self.e.trabajador.save()
+
+        guia = self.client.get(reverse("despacho:guia"), self.params)
+        self.assertNotContains(guia, "<th>Código</th>")
+        self.assertNotContains(guia, "C-0042")
+
+        self.empresa.usa_codigo_interno = True
+        self.empresa.save()
+        guia = self.client.get(reverse("despacho:guia"), self.params)
+        self.assertContains(guia, "<th>Código</th>")
+        self.assertContains(guia, "<td>C-0042</td>")
+
+    def test_solo_el_administrador(self):
+        self.client.force_login(self.e.garzon_a)
+        for vista in ("despacho:etiquetas", "despacho:guia"):
+            self.assertEqual(self.client.get(reverse(vista), self.params).status_code, 302)
+
+
+class VerificarDespachoTests(TestCase):
+    def setUp(self):
+        import datetime
+
+        from trabajadores.models import Trabajador
+
+        self.e = crear_escenario()
+        self.empresa = self.e.trabajador.empresa
+        self.e.local.hora_cierre_despacho = datetime.time(23, 59, 59)
+        self.e.local.save()
+        self.e.pollo.porciones = None
+        self.e.pollo.save()
+        for i in range(28):
+            Trabajador.objects.create(nombre=f"T{i:02d}", apellido="Despacho", rut=_rut_valido(31000000 + i), empresa=self.empresa)
+        self.hoy = timezone.localdate()
+        filas = [
+            {"trabajador": t, "token": nuevo_token(), "seleccion": [{"plato": self.e.pollo.pk}]}
+            for t in self.empresa.trabajadores.filter(eliminado_en__isnull=True)
+        ]
+        a_las_8 = timezone.make_aware(datetime.datetime.combine(self.hoy, datetime.time(8, 0)))
+        with patch("django.utils.timezone.now", return_value=a_las_8):  # no depende del reloj real
+            self.pedidos = despacho.confirmar_lista(self.e.admin, self.empresa, self.hoy, filas).creados
+        self.client.force_login(self.e.admin)
+
+    def leer(self, token, empresa=None, fecha=None):
+        return self.client.post(reverse("despacho:verificar_lectura"), {
+            "empresa": (empresa or self.empresa).pk, "fecha": (fecha or self.hoy).isoformat(), "token": token,
+        }).json()
+
+    def test_llega_a_30_de_30_solo_con_las_30_correctas_y_detecta_duplicados(self):
+        from empresas.models import Empresa
+
+        self.assertEqual(len(self.pedidos), 30)
+        for pedido in self.pedidos[:29]:
+            self.assertEqual(self.leer(pedido.token_etiqueta)["status"], "ok")
+
+        duplicada = self.leer(self.pedidos[0].token_etiqueta)
+        self.assertEqual((duplicada["status"], duplicada["progress"]["verified"]), ("duplicada", 29))
+        # Ajenas: QR de un trabajador, etiqueta de otra empresa y de otro día no cuentan.
+        otra = Empresa.objects.create(nombre="Otra SpA", rut="76333333-7", direccion="d", encargado_personal="e")
+        from trabajadores.models import Trabajador
+
+        ajeno = Trabajador.objects.create(nombre="Pía", apellido="Lagos", rut="44444444-4", empresa=otra)
+        pedido_ajeno = despacho.confirmar_lista(
+            self.e.admin, otra, self.hoy, [{"trabajador": ajeno, "token": nuevo_token(), "seleccion": [{"plato": self.e.pollo.pk}]}]
+        ).creados[0]
+        for token, motivo in (
+            (str(self.e.trabajador.token_qr), "No es una etiqueta de despacho"),
+            (pedido_ajeno.token_etiqueta, "otra empresa"),
+        ):
+            respuesta = self.leer(token)
+            self.assertEqual(respuesta["status"], "rechazada")
+            self.assertIn(motivo, respuesta["message"])
+        manana = self.hoy + timezone.timedelta(days=1)
+        self.assertIn("otro día", self.leer(self.pedidos[29].token_etiqueta, fecha=manana)["message"])
+
+        progreso = self.leer(self.pedidos[0].token_etiqueta)["progress"]
+        self.assertEqual((progreso["verified"], progreso["total"], progreso["ready"]), (29, 30, False))
+        self.assertEqual(progreso["missing"], [str(self.pedidos[29].consumo.trabajador)])
+
+        final = self.leer(self.pedidos[29].token_etiqueta)
+        self.assertEqual((final["progress"]["verified"], final["progress"]["total"], final["progress"]["ready"]), (30, 30, True))
+
+    def test_guarda_quien_y_cuando_y_no_toca_pedidos_ni_consumos(self):
+        from .models import VerificacionEtiqueta
+
+        antes = list(Pedido.objects.order_by("pk").values_list("estado", "mesa_nombre", "consumo__anulado"))
+        consumos = Consumo.objects.count()
+        self.leer(self.pedidos[0].token_etiqueta)
+
+        verificacion = VerificacionEtiqueta.objects.get()
+        self.assertEqual((verificacion.pedido, verificacion.verificado_por), (self.pedidos[0], self.e.admin))
+        self.assertIsNotNone(verificacion.verificado_en)
+        self.assertEqual(list(Pedido.objects.order_by("pk").values_list("estado", "mesa_nombre", "consumo__anulado")), antes)
+        self.assertEqual(Consumo.objects.count(), consumos)
+
+    def test_marmitas_se_verifican_por_envase(self):
+        self.empresa.tipo_envase = "marmita"
+        self.empresa.save()
+        pagina = self.client.get(reverse("despacho:etiquetas"), {"empresa": self.empresa.pk, "fecha": self.hoy.isoformat()})
+        marmita = pagina.context["marmitas"][0]
+
+        self.assertEqual(self.leer(self.pedidos[0].token_etiqueta)["status"], "rechazada")  # etiqueta individual
+        final = self.leer(marmita["token"])
+        self.assertEqual((final["status"], final["progress"]["verified"], final["progress"]["total"]), ("ok", 1, 1))
+        self.assertTrue(final["progress"]["ready"])
+
+    def test_pantalla_y_lectura_solo_para_el_administrador(self):
+        url = reverse("despacho:verificar") + f"?empresa={self.empresa.pk}"
+        self.assertContains(self.client.get(url), "0 / 30")
+        self.client.force_login(self.e.garzon_a)
+        self.assertEqual(self.client.get(url).status_code, 302)
+        respuesta = self.client.post(reverse("despacho:verificar_lectura"), {"empresa": self.empresa.pk, "token": self.pedidos[0].token_etiqueta})
+        self.assertEqual(respuesta.status_code, 302)

@@ -5,7 +5,8 @@ from django.contrib import messages
 from django.contrib.auth.decorators import user_passes_test
 from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
-from django.db.models import Count
+from django.contrib.auth import get_user_model
+from django.db.models import Count, Q
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -26,6 +27,8 @@ from menus.services import (
     reservar,
     ultima_seleccion,
 )
+from mesas.models import Mesa
+from mesas.services import MesaInvalida, identificar_mesa
 from operadores.models import local_de_usuario
 from trabajadores.models import Trabajador
 
@@ -38,6 +41,7 @@ from .services import (
     estado_cupo,
     registrar_consumo_diario,
     registrar_pedido,
+    validar_mesa,
 )
 
 
@@ -75,9 +79,11 @@ def dashboard(request):
 @user_passes_test(operador_o_administrador, login_url="login")
 def historial(request):
     es_admin = request.user.is_staff
+    # Los platos de cada pedido se traen en una sola consulta extra (no una por fila).
     consumos = Consumo.objects.select_related(
-        "trabajador", "trabajador__empresa", "operador", "local", "anulado_por", "pedido"
-    )
+        "trabajador", "trabajador__empresa", "operador", "local", "anulado_por", "pedido", "mesa"
+    ).prefetch_related("pedido__items")
+    local_propio = local_de_usuario(request.user)
 
     if es_admin:
         fecha = parse_date(request.GET.get("fecha", "") or "")
@@ -87,6 +93,8 @@ def historial(request):
     empresa_id = request.GET.get("empresa", "")
     local_id = request.GET.get("local", "")
     trabajador_id = request.GET.get("trabajador", "") if es_admin else ""
+    mesa_id = request.GET.get("mesa", "")
+    garzon_id = request.GET.get("garzon", "")
     rut_ingresado = request.GET.get("rut", "").strip()
     rut = ""
     rut_error = None
@@ -104,6 +112,11 @@ def historial(request):
         consumos = consumos.filter(local_id=int(local_id))
     if trabajador_id.isdigit():
         consumos = consumos.filter(trabajador_id=int(trabajador_id))
+    if mesa_id.isdigit():
+        # Los pedidos anteriores a que el consumo guardara la mesa la tienen solo en el pedido.
+        consumos = consumos.filter(Q(mesa_id=int(mesa_id)) | Q(pedido__mesa_id=int(mesa_id)))
+    if garzon_id.isdigit():
+        consumos = consumos.filter(operador_id=int(garzon_id))
     if rut:
         consumos = consumos.filter(trabajador__rut=rut)
     elif rut_error:
@@ -128,6 +141,21 @@ def historial(request):
             if es_admin and empresa_id.isdigit()
             else Trabajador.objects.none()
         ),
+        # El administrador elige entre todas las mesas; el garzón, entre las de su local.
+        "mesas": (
+            Mesa.objects.select_related("local").order_by("local__nombre", "nombre")
+            if es_admin
+            else Mesa.objects.filter(local=local_propio).order_by("nombre")
+        ),
+        # Garzones y administradores (también inactivos: aparecen en registros antiguos);
+        # el garzón ve solo los de su local.
+        "garzones": get_user_model().objects.filter(
+            Q(perfil_operador__isnull=False) | Q(is_staff=True)
+            if es_admin
+            else Q(perfil_operador__local=local_propio) | Q(perfil_administrador__local=local_propio)
+        ).order_by("first_name", "last_name", "username"),
+        "mesa_seleccionada": mesa_id,
+        "garzon_seleccionado": garzon_id,
         "fecha_seleccionada": fecha,
         "empresa_seleccionada": empresa_id,
         "trabajador_seleccionado": trabajador_id,
@@ -147,9 +175,10 @@ def _ultimos_del_operador(usuario, fecha, limite=5):
             "number": consumo.numero,
             "manual": consumo.metodo == Consumo.METODO_RUT,
             "folio": consumo.pedido.folio_texto if getattr(consumo, "pedido", None) else None,
+            "table": consumo.pedido.mesa_nombre if getattr(consumo, "pedido", None) else (consumo.mesa.nombre if consumo.mesa else ""),
         }
         for consumo in consumos_vigentes().filter(operador=usuario, fecha=fecha)
-        .select_related("trabajador", "trabajador__empresa", "pedido")
+        .select_related("trabajador", "trabajador__empresa", "pedido", "mesa")
         .order_by("-registrado_en")[:limite]
     ]
 
@@ -203,6 +232,34 @@ def _respuesta_cupo_agotado(trabajador, metodo, usados, cupo, hoy, status=200):
     }, status=status)
 
 
+def _es_qr_de_mesa(request):
+    """Los QR de trabajador son UUID; un QR que no lo es y coincide con una mesa es de mesa."""
+    if request.POST.get("trabajador_id", "").strip():
+        return False
+    contenido = request.POST.get("token", "").strip()
+    try:
+        uuid.UUID(contenido)
+    except ValueError:
+        return Mesa.objects.filter(token=contenido).exists()
+    return False
+
+
+def _escaneo_de_mesa(request, hoy):
+    """Escanear una mesa activa el modo mesa del escáner, con o sin menú publicado."""
+    try:
+        mesa = identificar_mesa(request.POST.get("token", ""), request.user)
+    except MesaInvalida as error:
+        return _respuesta_error(error.mensaje, hoy, code=error.codigo)
+    return JsonResponse({
+        "ok": True,
+        "status": "mesa",
+        "table_id": mesa.pk,
+        "table": mesa.nombre,
+        "message": f"{mesa.nombre}: escanea a cada comensal.",
+        "today_total": _total_hoy(hoy),
+    })
+
+
 @user_passes_test(operador_o_administrador, login_url="login")
 def escaner(request):
     hoy = timezone.localdate()
@@ -216,12 +273,24 @@ def escaner(request):
                 "ultimos": _ultimos_del_operador(request.user, hoy),
                 "local": local_de_usuario(request.user),
                 "con_menu": menu_publicado_de_usuario(request.user, hoy) is not None,
+                "con_codigo_interno": Empresa.objects.filter(usa_codigo_interno=True, activa=True).exists(),
+                "sin_mesas": not Mesa.objects.filter(local=local_de_usuario(request.user), activa=True).exists(),
             },
         )
+
+    if _es_qr_de_mesa(request):
+        return _escaneo_de_mesa(request, hoy)
 
     trabajador, metodo, error = _identificar_trabajador(request)
     if error:
         return _respuesta_error(error, hoy)
+
+    # El escáner es solo para atención en el local: sin mesa no se toma ningún pedido
+    # ni se registra ningún almuerzo, con o sin menú. Los despachos van por su pantalla.
+    try:
+        mesa = validar_mesa(_mesa_id(request), local_de_usuario(request.user))
+    except PedidoRechazado as rechazo:
+        return _respuesta_sin_mesa(rechazo, hoy)
 
     menu = menu_publicado_de_usuario(request.user, hoy)
     if menu is not None:
@@ -250,7 +319,7 @@ def escaner(request):
 
     # v0.1: sin menú publicado hoy, el escaneo registra el almuerzo directamente.
     try:
-        resultado = registrar_consumo_diario(trabajador.pk, request.user, fecha=hoy, metodo=metodo)
+        resultado = registrar_consumo_diario(trabajador.pk, request.user, fecha=hoy, metodo=metodo, mesa=mesa)
     except TrabajadorNoDisponible:
         return _respuesta_error(MENSAJE_NO_DISPONIBLE, hoy)
 
@@ -263,6 +332,7 @@ def escaner(request):
         "number": resultado.consumo.numero,
         "manual": metodo == Consumo.METODO_RUT,
         "time": timezone.localtime(resultado.consumo.registrado_en).strftime("%H:%M"),
+        "table": mesa.nombre,
         "today_total": _total_hoy(hoy),
     }
     if resultado.creado:
@@ -276,6 +346,40 @@ def escaner(request):
             "message": f"Cupo diario agotado ({resultado.usados} de {resultado.cupo}).",
         })
     return JsonResponse(datos)
+
+
+def _mesa_id(request):
+    return request.POST.get("mesa_id", "").strip() or None
+
+
+def _respuesta_sin_mesa(rechazo, hoy):
+    """Sin mesa (aviso naranja «Escanea primero la mesa») o mesa inválida (rojo)."""
+    if rechazo.codigo == "mesa_obligatoria":
+        return JsonResponse(
+            {"ok": False, "status": "sin_mesa", "code": rechazo.codigo, "message": rechazo.mensaje,
+             "today_total": _total_hoy(hoy)},
+            status=409,
+        )
+    return _respuesta_error(rechazo.mensaje, hoy, status=409, code=rechazo.codigo)
+
+
+@user_passes_test(operador_o_administrador, login_url="login")
+@require_POST
+def revalidar_mesa(request):
+    """El escáner guarda la mesa activa en la sesión del navegador; al volver a abrirlo
+    pregunta aquí si sigue activa y es del local de quien escanea. No registra nada."""
+    hoy = timezone.localdate()
+    try:
+        mesa = validar_mesa(_mesa_id(request), local_de_usuario(request.user))
+    except PedidoRechazado as rechazo:
+        return _respuesta_sin_mesa(rechazo, hoy)
+    return JsonResponse({
+        "ok": True,
+        "status": "mesa",
+        "table_id": mesa.pk,
+        "table": mesa.nombre,
+        "today_total": _total_hoy(hoy),
+    })
 
 
 def _token_seleccion(request):
@@ -342,7 +446,10 @@ def confirmar_pedido(request):
         return _respuesta_error("Selección no válida.", hoy, code="seleccion_incompleta")
 
     try:
-        resultado = registrar_pedido(trabajador.pk, request.user, token, seleccion, metodo=metodo, fecha=hoy)
+        resultado = registrar_pedido(
+            trabajador.pk, request.user, token, seleccion, metodo=metodo, fecha=hoy,
+            mesa_id=_mesa_id(request),
+        )
     except PedidoRechazado as rechazo:
         if rechazo.codigo == "cupo_agotado":
             return _respuesta_cupo_agotado(trabajador, metodo, rechazo.usados, rechazo.cupo, hoy, status=409)
@@ -370,19 +477,38 @@ def confirmar_pedido(request):
 
 @user_passes_test(operador_o_administrador, login_url="login")
 def buscar_por_rut(request):
-    """Busca trabajadores vigentes por RUT para el registro manual."""
+    """Busca trabajadores vigentes para el registro manual.
+
+    Principal: por RUT. Secundaria: si el RUT no es válido o no encuentra a nadie, por
+    código interno exacto, solo en empresas que lo usan (dos empresas pueden repetirlo).
+    """
+    texto = request.GET.get("rut", "").strip()
+    vigentes = Trabajador.objects.filter(activo=True, eliminado_en__isnull=True, empresa__activa=True)
+    rut, error_rut, encontrados = "", None, []
     try:
-        rut = normalizar_rut(request.GET.get("rut", ""))
+        rut = normalizar_rut(texto)
     except ValidationError as error:
-        return JsonResponse({"ok": False, "message": error.messages[0]}, status=400)
+        error_rut = error.messages[0]
+    else:
+        encontrados = list(vigentes.filter(rut=rut).select_related("empresa").order_by("empresa__nombre"))
+    hay_codigo = Empresa.objects.filter(usa_codigo_interno=True, activa=True).exists()
+    if not encontrados and hay_codigo and texto:
+        encontrados = list(
+            vigentes.filter(codigo_interno=texto, empresa__usa_codigo_interno=True)
+            .select_related("empresa").order_by("empresa__nombre")
+        )
+    if not encontrados:
+        if hay_codigo:
+            return JsonResponse(
+                {"ok": False, "message": "No hay trabajadores activos con ese RUT o código interno."}, status=404
+            )
+        if error_rut:
+            return JsonResponse({"ok": False, "message": error_rut}, status=400)
+        return JsonResponse({"ok": False, "message": "No hay trabajadores activos con ese RUT."}, status=404)
 
     hoy = timezone.localdate()
     candidatos = []
-    for trabajador in (
-        Trabajador.objects.filter(rut=rut, activo=True, eliminado_en__isnull=True, empresa__activa=True)
-        .select_related("empresa")
-        .order_by("empresa__nombre")
-    ):
+    for trabajador in encontrados:
         usados = consumos_vigentes().filter(trabajador=trabajador, fecha=hoy).count()
         candidatos.append({
             "id": trabajador.pk,
@@ -391,8 +517,6 @@ def buscar_por_rut(request):
             "used": usados,
             "quota": trabajador.cupo_diario,
         })
-    if not candidatos:
-        return JsonResponse({"ok": False, "message": "No hay trabajadores activos con ese RUT."}, status=404)
     return JsonResponse({"ok": True, "rut": rut, "results": candidatos})
 
 

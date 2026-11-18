@@ -41,6 +41,14 @@ def cambiar_plato(item_id, nuevo_plato_id, nuevo_acompanamiento_id, usuario, mot
 
         if pedido.estado != Pedido.PENDIENTE or pedido.consumo.anulado:
             raise PedidoRechazado("pedido_no_pendiente", "Solo se puede cambiar el plato de un pedido Pendiente.")
+        if pedido.es_despacho:
+            from .despacho import lista_abierta
+
+            trabajador = pedido.consumo.trabajador
+            if not lista_abierta(trabajador.empresa, pedido.local, pedido.fecha):
+                raise PedidoRechazado(
+                    "lista_cerrada", "La lista de despacho ya cerró: solo se puede anular con motivo."
+                )
         anterior = platos[linea.plato_id]
         nuevo = platos.get(nuevo_plato_id)
         if nuevo is None or nuevo.menu_id != anterior.menu_id or nuevo.tiempo_id != anterior.tiempo_id:

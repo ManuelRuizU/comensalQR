@@ -9,8 +9,8 @@
         <p><strong>{{ local }}</strong> → <strong>{{ empresa }}</strong> · {{ fecha|date:"l d/m/Y" }} · {{ total }} colación(es)</p>
     </header>
     <table class="table table-sm">
-        <thead><tr><th>#</th><th>Trabajador</th><th>RUT</th><th>Colación</th><th>Folio</th></tr></thead>
-        <tbody>{% for f in filas %}<tr><td>{{ forloop.counter }}</td><td>{{ f.nombre }}</td><td>{{ f.rut }}</td><td>{{ f.lineas|join:" · " }}</td><td>{{ f.folio }}</td></tr>{% empty %}<tr><td colspan="5">Sin pedidos de despacho registrados.</td></tr>{% endfor %}</tbody>
+        <thead><tr><th>#</th><th>Trabajador</th><th>RUT</th>{% if con_codigo %}<th>Código</th>{% endif %}<th>Colación</th><th>Folio</th></tr></thead>
+        <tbody>{% for f in filas %}<tr><td>{{ forloop.counter }}</td><td>{{ f.nombre }}</td><td>{{ f.rut }}</td>{% if con_codigo %}<td>{{ f.codigo }}</td>{% endif %}<td>{{ f.lineas|join:" · " }}</td><td>{{ f.folio }}</td></tr>{% empty %}<tr><td colspan="{% if con_codigo %}6{% else %}5{% endif %}">Sin pedidos de despacho registrados.</td></tr>{% endfor %}</tbody>
     </table>
     <h2>Totales por plato</h2>
     <table class="table table-sm cq-guia-totales">

@@ -13,8 +13,8 @@
         </div>
     </div></div>
     <div class="cq-card"><div class="cq-table-wrap"><table class="table cq-table">
-        <thead><tr><th>Nombre</th><th>RUT</th><th>Almuerzos/día</th></tr></thead>
-        <tbody>{% for trabajador in creados %}<tr><td>{{ trabajador }}</td><td>{{ trabajador.rut }}</td><td>{{ trabajador.cupo_diario }}</td></tr>{% endfor %}</tbody>
+        <thead><tr><th>Nombre</th><th>RUT</th>{% if empresa.usa_codigo_interno %}<th>Código</th>{% endif %}<th>Almuerzos/día</th></tr></thead>
+        <tbody>{% for trabajador in creados %}<tr><td>{{ trabajador }}</td><td>{{ trabajador.rut }}</td>{% if empresa.usa_codigo_interno %}<td>{{ trabajador.codigo_interno|default:"" }}</td>{% endif %}<td>{{ trabajador.cupo_diario }}</td></tr>{% endfor %}</tbody>
     </table></div></div>
 </div></div>
 {% endblock %}

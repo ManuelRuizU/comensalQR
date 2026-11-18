@@ -36,6 +36,10 @@ Permitir que un restaurante registre mediante QR:
 - Historial de consumos (búsqueda por RUT; el operador solo ve el día en curso)
 - Gestión de operadores (activar/desactivar, cambiar clave y local)
 - Edición de trabajadores (datos, excepción de cupo y estado activo)
+- Código interno del trabajador, opcional por empresa (Empresa.usa_codigo_interno):
+  ficha, importación (columna codigo_interno), guía de despacho y búsqueda
+  manual secundaria. Único por empresa entre vigentes; no reemplaza al RUT ni
+  va en el QR
 
 ## v0.2 — Fase 1 (terminada)
 

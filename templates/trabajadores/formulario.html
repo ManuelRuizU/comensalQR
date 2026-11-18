@@ -13,7 +13,7 @@
         {% csrf_token %}
         {{ form.non_field_errors }}
         {% for field in form %}
-            <div class="cq-form-field{% if field.field.widget.input_type == 'checkbox' %} cq-switch-field{% endif %}{% if not field.field.required %} optional{% endif %} mb-3{% if field.errors %} has-error{% endif %}">
+            <div id="campo-{{ field.name }}" class="cq-form-field{% if field.field.widget.input_type == 'checkbox' %} cq-switch-field{% endif %}{% if not field.field.required %} optional{% endif %} mb-3{% if field.errors %} has-error{% endif %}">
                 {{ field.errors }}
                 {{ field.label_tag }}
                 {{ field }}
@@ -24,3 +24,18 @@
     </form>
 </div></div>
 {% endblock %}
+
+{% block extra_scripts %}{% if form.codigo_interno %}
+<script>
+// El código interno solo aplica a empresas que lo usan: se muestra al elegir una de ellas.
+(function () {
+    const empresa = document.getElementById("{{ form.empresa.id_for_label }}");
+    const campo = document.getElementById("campo-codigo_interno");
+    if (!empresa || !campo) return;
+    const usan = (empresa.dataset.codigoInterno || "").split(",");
+    const actualizar = () => { campo.hidden = !usan.includes(empresa.value); };
+    empresa.addEventListener("change", actualizar);
+    actualizar();
+})();
+</script>
+{% endif %}{% endblock %}

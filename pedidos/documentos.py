@@ -87,9 +87,17 @@ def datos_guia(empresa, local, fecha):
     pedidos = list(despacho.pedidos_de_despacho(empresa, local, fecha))
     return {
         "filas": [
-            {"nombre": str(p.consumo.trabajador), "rut": p.consumo.trabajador.rut, "lineas": _lineas(p), "folio": p.folio_texto}
+            {
+                "nombre": str(p.consumo.trabajador),
+                "rut": p.consumo.trabajador.rut,
+                "codigo": p.consumo.trabajador.codigo_interno or "",
+                "lineas": _lineas(p),
+                "folio": p.folio_texto,
+            }
             for p in pedidos
         ],
+        # La columna «Código» solo aparece si la empresa usa código interno.
+        "con_codigo": empresa.usa_codigo_interno,
         "totales": despacho.totales_por_plato(pedidos),
         "total": len(pedidos),
     }

@@ -24,6 +24,9 @@ class Trabajador(models.Model):
         validators=[MinValueValidator(1), MaxValueValidator(10)],
         help_text="Déjalo vacío para usar el cupo diario de la empresa.",
     )
+    # Beneficio opcional por empresa (Empresa.usa_codigo_interno). No reemplaza al RUT
+    # ni va en el QR. Vacío se guarda como NULL para que la unicidad no choque.
+    codigo_interno = models.CharField(max_length=20, null=True, blank=True)
     activo = models.BooleanField(default=True)
     eliminado_en = models.DateTimeField(null=True, blank=True, editable=False)
     eliminado_por = models.ForeignKey(
@@ -46,6 +49,11 @@ class Trabajador(models.Model):
                 fields=["empresa", "rut"],
                 condition=models.Q(eliminado_en__isnull=True),
                 name="trabajador_rut_vigente_por_empresa_unique",
+            ),
+            models.UniqueConstraint(
+                fields=["empresa", "codigo_interno"],
+                condition=models.Q(eliminado_en__isnull=True, codigo_interno__isnull=False),
+                name="trabajador_codigo_interno_vigente_por_empresa_unique",
             ),
             models.CheckConstraint(
                 condition=models.Q(eliminado_en__isnull=True) | models.Q(activo=False),
@@ -79,10 +87,31 @@ class Trabajador(models.Model):
             raise ValidationError(
                 {"rut": "Ya existe un trabajador vigente con este RUT en la empresa."}
             )
+        self.codigo_interno = normalizar_codigo(self.codigo_interno)
+        if (
+            self.codigo_interno
+            and self.empresa_id
+            and self.eliminado_en is None
+            and Trabajador.objects.filter(
+                empresa_id=self.empresa_id,
+                codigo_interno=self.codigo_interno,
+                eliminado_en__isnull=True,
+            ).exclude(pk=self.pk).exists()
+        ):
+            raise ValidationError(
+                {"codigo_interno": "Ya existe un trabajador vigente con este código interno en la empresa."}
+            )
 
     def save(self, *args, **kwargs):
         self.rut = normalizar_rut(self.rut)
+        self.codigo_interno = normalizar_codigo(self.codigo_interno)
         super().save(*args, **kwargs)
+
+
+def normalizar_codigo(valor):
+    """Código interno sin espacios a los lados; vacío = None (no participa de la unicidad)."""
+    valor = (valor or "").strip()
+    return valor or None
 
 
 class TokenQRReservado(models.Model):

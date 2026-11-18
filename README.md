@@ -259,6 +259,24 @@ Desde el listado de trabajadores de una empresa (o su perfil), **Importar desde 
 3. Revisa la vista previa. Si alguna fila tiene errores (RUT inválido, repetido en el archivo o ya vigente en la empresa, nombre faltante, cupo fuera de 1–10) no se importa nada.
 4. Confirma: se crean todos los trabajadores en una sola transacción, cada uno con su QR.
 
+### Código interno del trabajador (opcional por empresa)
+
+Beneficio que el administrador activa por empresa con **Usa código interno de
+trabajador**. No reemplaza al RUT ni va en el QR.
+
+- **Apagado** (por defecto): el código no aparece en la ficha del trabajador,
+  la importación ni la guía de despacho, y no se busca en el registro manual.
+- **Encendido**:
+  - La ficha del trabajador muestra «Código interno» (opcional).
+  - La importación acepta la columna opcional `codigo_interno`, y la plantilla la
+    incluye.
+  - La guía de despacho muestra la columna «Código».
+  - El registro manual del escáner lo busca como búsqueda secundaria, si el RUT
+    no es válido o no encuentra a nadie.
+- El código es único entre los trabajadores vigentes de la misma empresa; dos
+  empresas pueden repetirlo. Si una empresa apaga el beneficio, los códigos se
+  conservan pero dejan de mostrarse y de buscarse.
+
 ### Tarjetas QR: papel y teléfono
 
 Cada trabajador recibe el **mismo QR en dos formatos**, para que uno respalde al otro:

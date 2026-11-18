@@ -23,6 +23,7 @@ class EmpresaForm(forms.ModelForm):
             "almuerzos_diarios",
             "hora_cierre_despacho",
             "tipo_envase",
+            "usa_codigo_interno",
             "activa",
         ]
         labels = {
@@ -35,5 +36,6 @@ class EmpresaForm(forms.ModelForm):
             "almuerzos_diarios": "Almuerzos diarios por trabajador",
             "hora_cierre_despacho": "Cierre de su lista de despacho",
             "tipo_envase": "Envase del despacho",
+            "usa_codigo_interno": "Usa código interno de trabajador",
             "activa": "Empresa activa",
         }

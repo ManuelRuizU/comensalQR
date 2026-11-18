@@ -24,6 +24,11 @@ class Empresa(models.Model):
     ENVASE_MARMITA = "marmita"
     TIPOS_ENVASE = [(ENVASE_INDIVIDUAL, "Individual"), (ENVASE_MARMITA, "Marmita")]
     tipo_envase = models.CharField(max_length=12, choices=TIPOS_ENVASE, default=ENVASE_INDIVIDUAL)
+    usa_codigo_interno = models.BooleanField(
+        default=False,
+        help_text="Muestra el código interno del trabajador en su ficha, la importación, "
+        "la guía de despacho y la búsqueda manual del escáner.",
+    )
     activa = models.BooleanField(default=True)
     creada_en = models.DateTimeField(auto_now_add=True)
 

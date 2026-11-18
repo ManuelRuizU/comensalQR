@@ -273,6 +273,7 @@ def escaner(request):
                 "ultimos": _ultimos_del_operador(request.user, hoy),
                 "local": local_de_usuario(request.user),
                 "con_menu": menu_publicado_de_usuario(request.user, hoy) is not None,
+                "con_codigo_interno": Empresa.objects.filter(usa_codigo_interno=True, activa=True).exists(),
                 "sin_mesas": not Mesa.objects.filter(local=local_de_usuario(request.user), activa=True).exists(),
             },
         )
@@ -476,19 +477,38 @@ def confirmar_pedido(request):
 
 @user_passes_test(operador_o_administrador, login_url="login")
 def buscar_por_rut(request):
-    """Busca trabajadores vigentes por RUT para el registro manual."""
+    """Busca trabajadores vigentes para el registro manual.
+
+    Principal: por RUT. Secundaria: si el RUT no es válido o no encuentra a nadie, por
+    código interno exacto, solo en empresas que lo usan (dos empresas pueden repetirlo).
+    """
+    texto = request.GET.get("rut", "").strip()
+    vigentes = Trabajador.objects.filter(activo=True, eliminado_en__isnull=True, empresa__activa=True)
+    rut, error_rut, encontrados = "", None, []
     try:
-        rut = normalizar_rut(request.GET.get("rut", ""))
+        rut = normalizar_rut(texto)
     except ValidationError as error:
-        return JsonResponse({"ok": False, "message": error.messages[0]}, status=400)
+        error_rut = error.messages[0]
+    else:
+        encontrados = list(vigentes.filter(rut=rut).select_related("empresa").order_by("empresa__nombre"))
+    hay_codigo = Empresa.objects.filter(usa_codigo_interno=True, activa=True).exists()
+    if not encontrados and hay_codigo and texto:
+        encontrados = list(
+            vigentes.filter(codigo_interno=texto, empresa__usa_codigo_interno=True)
+            .select_related("empresa").order_by("empresa__nombre")
+        )
+    if not encontrados:
+        if hay_codigo:
+            return JsonResponse(
+                {"ok": False, "message": "No hay trabajadores activos con ese RUT o código interno."}, status=404
+            )
+        if error_rut:
+            return JsonResponse({"ok": False, "message": error_rut}, status=400)
+        return JsonResponse({"ok": False, "message": "No hay trabajadores activos con ese RUT."}, status=404)
 
     hoy = timezone.localdate()
     candidatos = []
-    for trabajador in (
-        Trabajador.objects.filter(rut=rut, activo=True, eliminado_en__isnull=True, empresa__activa=True)
-        .select_related("empresa")
-        .order_by("empresa__nombre")
-    ):
+    for trabajador in encontrados:
         usados = consumos_vigentes().filter(trabajador=trabajador, fecha=hoy).count()
         candidatos.append({
             "id": trabajador.pk,
@@ -497,8 +517,6 @@ def buscar_por_rut(request):
             "used": usados,
             "quota": trabajador.cupo_diario,
         })
-    if not candidatos:
-        return JsonResponse({"ok": False, "message": "No hay trabajadores activos con ese RUT."}, status=404)
     return JsonResponse({"ok": True, "rut": rut, "results": candidatos})
 
 

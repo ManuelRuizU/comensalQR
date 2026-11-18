@@ -1187,6 +1187,20 @@ class DocumentosDespachoTests(TestCase):
         self.assertNotContains(guia, "Ana Soto")
         self.assertContains(guia, "Firma")
 
+    def test_la_guia_muestra_codigo_solo_si_la_empresa_lo_usa(self):
+        self.e.trabajador.codigo_interno = "C-0042"
+        self.e.trabajador.save()
+
+        guia = self.client.get(reverse("despacho:guia"), self.params)
+        self.assertNotContains(guia, "<th>Código</th>")
+        self.assertNotContains(guia, "C-0042")
+
+        self.empresa.usa_codigo_interno = True
+        self.empresa.save()
+        guia = self.client.get(reverse("despacho:guia"), self.params)
+        self.assertContains(guia, "<th>Código</th>")
+        self.assertContains(guia, "<td>C-0042</td>")
+
     def test_solo_el_administrador(self):
         self.client.force_login(self.e.garzon_a)
         for vista in ("despacho:etiquetas", "despacho:guia"):

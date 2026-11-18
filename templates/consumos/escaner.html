@@ -55,9 +55,9 @@
 
 <dialog id="dlg-manual" class="cq-sheet" aria-labelledby="dlg-manual-title">
     <div class="cq-sheet-head"><h2 id="dlg-manual-title">Registro manual por RUT</h2><button type="button" class="cq-sheet-close" data-cerrar aria-label="Cerrar">×</button></div>
-    <p class="cq-sheet-help">Úsalo solo si el trabajador no trae su tarjeta ni su teléfono. Queda registrado como manual y a tu nombre.</p>
+    <p class="cq-sheet-help">Úsalo solo si el trabajador no trae su tarjeta ni su teléfono. Queda registrado como manual y a tu nombre.{% if con_codigo_interno %} También puedes buscar por código interno.{% endif %}</p>
     <form id="form-rut" class="cq-sheet-search">
-        <input id="input-rut" name="rut" inputmode="text" autocomplete="off" autocapitalize="characters" placeholder="12.345.678-5" required aria-label="RUT del trabajador">
+        <input id="input-rut" name="rut" inputmode="text" autocomplete="off" autocapitalize="characters" placeholder="{% if con_codigo_interno %}RUT o código interno{% else %}12.345.678-5{% endif %}" required aria-label="{% if con_codigo_interno %}RUT o código interno del trabajador{% else %}RUT del trabajador{% endif %}">
         <button type="submit" class="btn btn-primary">Buscar</button>
     </form>
     <div id="resultados-rut" class="cq-sheet-list" aria-live="polite"></div>

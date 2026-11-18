@@ -557,3 +557,200 @@ class EditarTrabajadorTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.trabajador.refresh_from_db()
         self.assertIsNone(self.trabajador.almuerzos_diarios)
+
+
+class CodigoInternoTests(TestCase):
+    """Código interno del trabajador: beneficio opcional por empresa (Empresa.usa_codigo_interno)."""
+
+    def setUp(self):
+        User = get_user_model()
+        self.admin = User.objects.create_user(username="admin-cod", password="x", is_staff=True)
+        self.con = Empresa.objects.create(
+            nombre="Con Código", rut="76111111-6", direccion="Dir", encargado_personal="RRHH",
+            usa_codigo_interno=True,
+        )
+        self.sin = Empresa.objects.create(
+            nombre="Sin Código", rut="76222222-1", direccion="Dir", encargado_personal="RRHH",
+        )
+        self.client.force_login(self.admin)
+
+    def trabajador(self, empresa, rut, codigo=None, **extra):
+        return Trabajador.objects.create(
+            nombre="Ana", apellido=rut[:2], rut=rut, empresa=empresa, codigo_interno=codigo, **extra
+        )
+
+    def datos(self, empresa, rut, codigo):
+        return {"empresa": empresa.pk, "nombre": "Luis", "apellido": "Rojas", "rut": rut,
+                "codigo_interno": codigo, "almuerzos_diarios": "", "activo": "on"}
+
+    # --- Unicidad --------------------------------------------------------------------
+    def test_duplicado_en_la_misma_empresa_se_rechaza(self):
+        self.trabajador(self.con, "11111111-1", "A1")
+
+        respuesta = self.client.post(reverse("trabajadores:crear"), self.datos(self.con, "22222222-2", "A1"))
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertIn("código interno", str(respuesta.context["form"].errors))
+        self.assertFalse(Trabajador.objects.filter(rut="22222222-2").exists())
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            self.trabajador(self.con, "33333333-3", "A1")
+
+    def test_repetido_entre_empresas_distintas_se_permite(self):
+        otra = Empresa.objects.create(
+            nombre="Otra con código", rut="76333333-7", direccion="Dir", encargado_personal="RRHH",
+            usa_codigo_interno=True,
+        )
+        self.trabajador(self.con, "11111111-1", "A1")
+
+        respuesta = self.client.post(reverse("trabajadores:crear"), self.datos(otra, "11111111-1", "A1"))
+
+        self.assertEqual(respuesta.status_code, 302)
+        self.assertEqual(Trabajador.objects.filter(codigo_interno="A1").count(), 2)
+
+    def test_vacios_y_eliminados_no_chocan(self):
+        self.trabajador(self.con, "11111111-1", "")
+        self.trabajador(self.con, "22222222-2", "  ")
+        self.trabajador(self.con, "33333333-3", "A1", activo=False, eliminado_en=timezone.now())
+
+        self.trabajador(self.con, "44444444-4", "A1")  # el anterior está eliminado
+
+        self.assertEqual(Trabajador.objects.filter(codigo_interno__isnull=True).count(), 2)
+
+    # --- Visibilidad según la empresa -----------------------------------------------
+    def test_ficha_con_empresa_que_lo_usa_lo_muestra_y_guarda(self):
+        formulario = self.client.get(reverse("trabajadores:crear"))
+        self.assertContains(formulario, 'name="codigo_interno"')
+        self.assertContains(formulario, f'data-codigo-interno="{self.con.pk}"')
+
+        self.client.post(reverse("trabajadores:crear"), self.datos(self.con, "11111111-1", " B-7 "))
+
+        self.assertEqual(Trabajador.objects.get(rut="11111111-1").codigo_interno, "B-7")
+
+    def test_apagado_no_se_muestra_ni_se_guarda(self):
+        self.con.usa_codigo_interno = False
+        self.con.save()
+
+        formulario = self.client.get(reverse("trabajadores:crear"))
+        self.assertNotContains(formulario, 'name="codigo_interno"')
+        self.client.post(reverse("trabajadores:crear"), self.datos(self.sin, "11111111-1", "X9"))
+        self.assertIsNone(Trabajador.objects.get(rut="11111111-1").codigo_interno)
+
+    def test_empresa_sin_codigo_descarta_lo_escrito_aunque_otra_lo_use(self):
+        self.client.post(reverse("trabajadores:crear"), self.datos(self.sin, "11111111-1", "X9"))
+
+        self.assertIsNone(Trabajador.objects.get(rut="11111111-1").codigo_interno)
+
+    def test_edicion_con_empresa_fija_decide_el_servidor(self):
+        from consumos.models import Consumo
+
+        operador = get_user_model().objects.create_user(username="mozo-cod", password="x")
+        con = self.trabajador(self.con, "11111111-1", "A1")
+        sin = self.trabajador(self.sin, "22222222-2")
+        for t in (con, sin):
+            Consumo.objects.create(trabajador=t, fecha=date(2026, 10, 1), operador=operador)
+
+        self.assertContains(self.client.get(reverse("trabajadores:editar", args=[con.pk])), 'value="A1"')
+        self.assertNotContains(self.client.get(reverse("trabajadores:editar", args=[sin.pk])), 'name="codigo_interno"')
+
+    def test_formulario_de_empresa_permite_activarlo(self):
+        from empresas.forms import EmpresaForm
+
+        self.assertIn("usa_codigo_interno", EmpresaForm().fields)
+
+    # --- Importación -----------------------------------------------------------------
+    def subir(self, empresa, contenido):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        return self.client.post(
+            reverse("trabajadores:importar", args=[empresa.pk]),
+            {"archivo": SimpleUploadedFile("nomina.csv", contenido.encode())},
+        )
+
+    def confirmar(self, empresa, vista_previa):
+        return self.client.post(
+            reverse("trabajadores:importar", args=[empresa.pk]),
+            {"accion": "confirmar", "token": vista_previa.context["token"]},
+        )
+
+    def test_importacion_acepta_la_columna_si_la_empresa_lo_usa(self):
+        vista = self.subir(self.con, "nombre,apellido,rut,codigo_interno\nJosé,Muñoz,12.492.336-0,Z-1\nAna,Pérez,11111111-1,\n")
+        self.assertEqual(vista.context["validas"], 2)
+        self.assertContains(vista, "<th>Código</th>")
+
+        self.confirmar(self.con, vista)
+
+        self.assertEqual(Trabajador.objects.get(rut="12492336-0").codigo_interno, "Z-1")
+        self.assertIsNone(Trabajador.objects.get(rut="11111111-1").codigo_interno)
+
+    def test_importacion_rechaza_codigos_duplicados(self):
+        self.trabajador(self.con, "33333333-3", "Z-1")
+
+        vista = self.subir(self.con, "nombre,apellido,rut,codigo_interno\nJosé,Muñoz,12.492.336-0,Z-1\nAna,Pérez,11111111-1,Z-2\nLuis,Rojas,22222222-2,Z-2\n")
+
+        errores = {f.numero: f.errores for f in vista.context["filas"]}
+        self.assertIn("Ya existe un trabajador vigente con este código interno en la empresa.", errores[2])
+        self.assertEqual(errores[3], [])
+        self.assertIn("Código interno repetido en el archivo (fila 3).", errores[4])
+        self.assertIsNone(vista.context["token"])
+
+    def test_importacion_ignora_la_columna_si_la_empresa_no_lo_usa(self):
+        vista = self.subir(self.sin, "nombre,apellido,rut,codigo_interno\nJosé,Muñoz,12.492.336-0,Z-1\n")
+        self.assertNotContains(vista, "<th>Código</th>")
+        self.assertNotContains(vista, "Z-1")
+
+        self.confirmar(self.sin, vista)
+
+        self.assertIsNone(Trabajador.objects.get(rut="12492336-0").codigo_interno)
+
+    def test_plantilla_agrega_la_columna_solo_si_se_pide(self):
+        import io
+
+        from openpyxl import load_workbook
+
+        def encabezado(url):
+            libro = load_workbook(io.BytesIO(self.client.get(url).content))
+            return [c.value for c in libro.worksheets[0][1]]
+
+        self.assertNotIn("codigo_interno", encabezado(reverse("trabajadores:plantilla")))
+        self.assertEqual(encabezado(reverse("trabajadores:plantilla") + "?codigo_interno=1")[-1], "codigo_interno")
+        self.assertContains(self.client.get(reverse("trabajadores:importar", args=[self.con.pk])), "?codigo_interno=1")
+        self.assertNotContains(self.client.get(reverse("trabajadores:importar", args=[self.sin.pk])), "?codigo_interno=1")
+
+    # --- Registro manual -------------------------------------------------------------
+    def buscar(self, texto):
+        return self.client.get(reverse("consumos:buscar_rut"), {"rut": texto})
+
+    def test_busqueda_manual_por_codigo_encuentra_al_trabajador(self):
+        ana = self.trabajador(self.con, "11111111-1", "4521")
+
+        respuesta = self.buscar("4521")
+
+        self.assertEqual(respuesta.status_code, 200)
+        self.assertEqual([r["id"] for r in respuesta.json()["results"]], [ana.pk])
+
+    def test_busqueda_manual_por_codigo_solo_en_empresas_que_lo_usan(self):
+        self.trabajador(self.sin, "11111111-1", "4521")  # código guardado de cuando la usaba
+
+        respuesta = self.buscar("4521")
+
+        self.assertEqual(respuesta.status_code, 404)
+        self.assertIn("RUT o código interno", respuesta.json()["message"])
+
+    def test_el_rut_sigue_siendo_la_busqueda_principal(self):
+        ana = self.trabajador(self.con, "11111111-1")
+        self.trabajador(self.con, "22222222-2", "11111111-1")  # código con forma de RUT
+
+        respuesta = self.buscar("11.111.111-1")
+
+        self.assertEqual([r["id"] for r in respuesta.json()["results"]], [ana.pk])
+
+    def test_codigo_que_parece_rut_valido_igual_se_encuentra(self):
+        # «1-9» es un RUT con formato válido; si nadie tiene ese RUT, se busca como código.
+        luis = self.trabajador(self.con, "11111111-1", "1-9")
+
+        self.assertEqual([r["id"] for r in self.buscar("1-9").json()["results"]], [luis.pk])
+
+    def test_el_codigo_no_va_en_el_qr(self):
+        ana = self.trabajador(self.con, "11111111-1", "A1")
+
+        self.assertNotIn("A1", str(ana.token_qr))

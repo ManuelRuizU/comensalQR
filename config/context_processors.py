@@ -3,7 +3,12 @@ import hashlib
 from django.conf import settings
 
 
-_ARCHIVOS_VERSIONADOS = ("css/app.css", "js/app.js", "js/hoja_pedido.js")
+_ARCHIVOS_VERSIONADOS = (
+    "css/app.css",
+    "js/app.js",
+    "js/hoja_pedido.js",
+    "vendor/bootstrap/bootstrap.min.css",
+)
 
 
 def version_estaticos(request):

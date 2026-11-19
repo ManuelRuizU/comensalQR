@@ -676,6 +676,11 @@ body {
 }
 
 
+/* Menú hamburguesa de la barra del administrador: comparte el estilo del menú
+   del escáner (más abajo); aquí solo lo propio de la barra. */
+.cq-nav-menu summary { color: var(--cq-on-dark); }
+.cq-nav-menu .cq-nav-menu-list { max-height: calc(100vh - 5rem); overflow-y: auto; }
+
 /* ===== Escáner de pantalla completa ===================================== */
 .cq-scanner-body {
     background: var(--cq-scanner-bg) !important;
@@ -724,9 +729,11 @@ body {
     span.cq-scan-brand + .cq-scan-mesa { margin-right: auto; }
 }
 
-.cq-scan-menu { position: relative; }
+.cq-scan-menu,
+.cq-nav-menu { position: relative; }
 
-.cq-scan-menu summary {
+.cq-scan-menu summary,
+.cq-nav-menu summary {
     align-items: center;
     border-radius: var(--cq-radius-sm);
     cursor: pointer;
@@ -737,10 +744,13 @@ body {
     width: 44px;
 }
 
-.cq-scan-menu summary::-webkit-details-marker { display: none; }
-.cq-scan-menu[open] summary { background: rgba(255, 255, 255, 0.14); }
+.cq-scan-menu summary::-webkit-details-marker,
+.cq-nav-menu summary::-webkit-details-marker { display: none; }
+.cq-scan-menu[open] summary,
+.cq-nav-menu[open] summary { background: rgba(255, 255, 255, 0.14); }
 
-.cq-scan-menu-list {
+.cq-scan-menu-list,
+.cq-nav-menu-list {
     background: var(--cq-surface);
     border-radius: var(--cq-radius);
     box-shadow: var(--cq-shadow-lg);
@@ -755,7 +765,8 @@ body {
     z-index: 20;
 }
 
-.cq-scan-menu-user {
+.cq-scan-menu-user,
+.cq-nav-menu-user {
     border-bottom: 1px solid var(--cq-line);
     color: var(--cq-muted);
     font-size: 0.85rem;
@@ -763,7 +774,9 @@ body {
 }
 
 .cq-scan-menu-list a,
-.cq-scan-menu-list button {
+.cq-scan-menu-list button,
+.cq-nav-menu-list a,
+.cq-nav-menu-list button {
     background: none;
     border: 0;
     color: var(--cq-ink);
@@ -775,9 +788,12 @@ body {
 }
 
 .cq-scan-menu-list a:hover,
-.cq-scan-menu-list button:hover { background: var(--cq-paper); }
+.cq-scan-menu-list button:hover,
+.cq-nav-menu-list a:hover,
+.cq-nav-menu-list button:hover { background: var(--cq-paper); }
 
-.cq-scan-menu-list form { border-top: 1px solid var(--cq-line); margin: 0; }
+.cq-scan-menu-list form,
+.cq-nav-menu-list form { border-top: 1px solid var(--cq-line); margin: 0; }
 
 .cq-scan-stage {
     align-items: center;

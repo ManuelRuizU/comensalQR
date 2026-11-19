@@ -12,16 +12,16 @@
             <button class="btn btn-outline-danger btn-sm" type="submit">Eliminar seleccionados</button>
         </div>
         <div class="cq-table-wrap">
-            <table class="table cq-table">
+            <table class="table cq-table cq-table-cards">
                 <thead><tr><th></th><th>Nombre</th><th>Dirección</th><th>Teléfono</th><th>Estado</th><th></th></tr></thead>
                 <tbody>
                     {% for local in locales %}
                     <tr>
-                        <td><input name="locales" value="{{ local.pk }}" type="checkbox"></td>
-                        <td class="fw-semibold">{{ local.nombre }}</td>
-                        <td>{{ local.direccion }}</td>
-                        <td>{{ local.telefono|default:"-" }}</td>
-                        <td>{% if local.activo %}<span class="badge text-bg-success">Activo</span>{% else %}<span class="badge text-bg-secondary">Inactivo</span>{% endif %}</td>
+                        <td class="cq-cell-select"><input name="locales" value="{{ local.pk }}" type="checkbox" aria-label="Seleccionar {{ local.nombre }}"></td>
+                        <td class="fw-semibold cq-cell-title">{{ local.nombre }}</td>
+                        <td data-label="Dirección">{{ local.direccion }}</td>
+                        <td data-label="Teléfono">{{ local.telefono|default:"-" }}</td>
+                        <td data-label="Estado">{% if local.activo %}<span class="badge text-bg-success">Activo</span>{% else %}<span class="badge text-bg-secondary">Inactivo</span>{% endif %}</td>
                         <td><a href="{% url 'locales:editar' local.pk %}">Editar</a></td>
                     </tr>
                     {% empty %}<tr><td colspan="6" class="text-secondary">No hay locales registrados.</td></tr>{% endfor %}

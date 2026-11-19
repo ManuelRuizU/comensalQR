@@ -12,7 +12,7 @@
     </div>
 </div>
 <div class="cq-card">
-    <div class="d-flex justify-content-end mb-3">
+    <div class="d-flex justify-content-end px-3 pt-3">
         {% if ver_eliminados %}
             <a class="btn btn-outline-secondary btn-sm" href="{% if empresa %}{% url 'trabajadores:por_empresa' empresa.pk %}{% else %}{% url 'trabajadores:lista' %}{% endif %}">Ver trabajadores vigentes</a>
         {% else %}
@@ -38,16 +38,16 @@
                     <button class="btn btn-outline-danger btn-sm" type="submit">Eliminar trabajador</button>
                 </div>
             </div>{% endif %}
-            <div class="cq-table-wrap">
-                <table class="table cq-table">
-                    <thead><tr><th></th><th>Nombre</th><th>RUT</th><th>Empresa</th><th>Almuerzos/día</th><th>Estado</th><th>Acciones</th></tr></thead>
+            <div class="cq-table-wrap cq-con-paneles">
+                <table class="table cq-table cq-table-cards">
+                    <thead><tr><th></th><th>Nombre</th><th>RUT</th><th>Empresa</th><th>Almuerzos/día</th><th>Estado</th><th class="text-end">Acciones</th></tr></thead>
                     <tbody>
                         {% for trabajador in trabajadores %}
                             <tr>
-                                <td>{% if not ver_eliminados %}<label class="cq-switch cq-switch-table"><input class="worker-checkbox" name="trabajadores" value="{{ trabajador.pk }}" type="checkbox"><span class="cq-switch-track" aria-hidden="true"></span><span class="visually-hidden">Seleccionar {{ trabajador }}</span></label>{% endif %}</td>
-                                <td class="fw-semibold">{{ trabajador }}</td><td>{{ trabajador.rut }}</td><td>{{ trabajador.empresa }}</td><td>{{ trabajador.cupo_diario }}{% if trabajador.almuerzos_diarios %} <span class="badge text-bg-info">excepción</span>{% endif %}</td>
-                                <td>{% if trabajador.eliminado_en %}<span class="badge text-bg-danger">Eliminado · {{ trabajador.eliminado_en|date:'d/m/Y' }}</span>{% elif trabajador.activo %}<span class="badge text-bg-success">Activo</span>{% else %}<span class="badge text-bg-secondary">Inactivo</span>{% endif %}</td>
-                                <td>{% if not trabajador.eliminado_en %}<a class="btn btn-sm btn-outline-secondary" href="{% url 'trabajadores:editar' trabajador.pk %}">Editar</a><a class="btn btn-sm btn-outline-primary" href="{% url 'trabajadores:qr' trabajador.pk %}">Tarjeta impresa</a><a class="btn btn-sm btn-outline-primary" href="{% url 'trabajadores:qr_telefono' trabajador.pk %}">Imagen teléfono</a>{% if trabajador.activo %}<button class="btn btn-sm btn-outline-danger" type="submit" form="regenerar-qr-{{ trabajador.pk }}">Regenerar QR</button>{% endif %}{% endif %}</td>
+                                <td class="cq-cell-select">{% if not ver_eliminados %}<label class="cq-switch cq-switch-table"><input class="worker-checkbox" name="trabajadores" value="{{ trabajador.pk }}" type="checkbox"><span class="cq-switch-track" aria-hidden="true"></span><span class="visually-hidden">Seleccionar {{ trabajador }}</span></label>{% endif %}</td>
+                                <td class="fw-semibold cq-cell-title">{{ trabajador }}</td><td data-label="RUT">{{ trabajador.rut }}</td><td data-label="Empresa">{{ trabajador.empresa }}</td><td data-label="Almuerzos/día">{{ trabajador.cupo_diario }}{% if trabajador.almuerzos_diarios %} <span class="badge text-bg-info">excepción</span>{% endif %}</td>
+                                <td data-label="Estado">{% if trabajador.eliminado_en %}<span class="badge text-bg-danger">Eliminado · {{ trabajador.eliminado_en|date:'d/m/Y' }}</span>{% elif trabajador.activo %}<span class="badge text-bg-success">Activo</span>{% else %}<span class="badge text-bg-secondary">Inactivo</span>{% endif %}</td>
+                                <td class="text-end">{% if not trabajador.eliminado_en %}<div class="cq-row-actions"><a class="btn btn-sm btn-outline-secondary" href="{% url 'trabajadores:editar' trabajador.pk %}">Editar</a><details class="cq-item-acciones"><summary class="btn btn-sm btn-outline-secondary">Opciones</summary><div class="cq-item-panel"><a class="btn btn-sm btn-outline-primary" href="{% url 'trabajadores:qr' trabajador.pk %}">Tarjeta impresa</a><a class="btn btn-sm btn-outline-primary" href="{% url 'trabajadores:qr_telefono' trabajador.pk %}">Imagen teléfono</a>{% if trabajador.activo %}<button class="btn btn-sm btn-outline-danger" type="submit" form="regenerar-qr-{{ trabajador.pk }}">Regenerar QR</button>{% endif %}</div></details></div>{% endif %}</td>
                             </tr>
                         {% empty %}
                             <tr><td colspan="7" class="text-secondary">Esta empresa no tiene trabajadores registrados.</td></tr>
@@ -57,10 +57,10 @@
             </div>
         </form>
     {% else %}
-        <div class="cq-table-wrap">
-            <table class="table cq-table">
-                <thead><tr><th>Nombre</th><th>RUT</th><th>Empresa</th><th>Almuerzos/día</th><th>Estado</th><th>Acciones</th></tr></thead>
-                <tbody>{% for trabajador in trabajadores %}<tr><td class="fw-semibold">{{ trabajador }}</td><td>{{ trabajador.rut }}</td><td>{{ trabajador.empresa }}</td><td>{{ trabajador.cupo_diario }}{% if trabajador.almuerzos_diarios %} <span class="badge text-bg-info">excepción</span>{% endif %}</td><td>{% if trabajador.eliminado_en %}<span class="badge text-bg-danger">Eliminado · {{ trabajador.eliminado_en|date:'d/m/Y' }}</span>{% elif trabajador.activo %}<span class="badge text-bg-success">Activo</span>{% else %}<span class="badge text-bg-secondary">Inactivo</span>{% endif %}</td><td>{% if not trabajador.eliminado_en %}<a class="btn btn-sm btn-outline-secondary" href="{% url 'trabajadores:editar' trabajador.pk %}">Editar</a><a class="btn btn-sm btn-outline-primary" href="{% url 'trabajadores:qr' trabajador.pk %}">Tarjeta impresa</a><a class="btn btn-sm btn-outline-primary" href="{% url 'trabajadores:qr_telefono' trabajador.pk %}">Imagen teléfono</a>{% if trabajador.activo %}<button class="btn btn-sm btn-outline-danger" type="submit" form="regenerar-qr-{{ trabajador.pk }}">Regenerar QR</button>{% endif %}{% endif %}</td></tr>{% empty %}<tr><td colspan="6" class="text-secondary">No hay trabajadores registrados.</td></tr>{% endfor %}</tbody>
+        <div class="cq-table-wrap cq-con-paneles">
+            <table class="table cq-table cq-table-cards">
+                <thead><tr><th>Nombre</th><th>RUT</th><th>Empresa</th><th>Almuerzos/día</th><th>Estado</th><th class="text-end">Acciones</th></tr></thead>
+                <tbody>{% for trabajador in trabajadores %}<tr><td class="fw-semibold cq-cell-title">{{ trabajador }}</td><td data-label="RUT">{{ trabajador.rut }}</td><td data-label="Empresa">{{ trabajador.empresa }}</td><td data-label="Almuerzos/día">{{ trabajador.cupo_diario }}{% if trabajador.almuerzos_diarios %} <span class="badge text-bg-info">excepción</span>{% endif %}</td><td data-label="Estado">{% if trabajador.eliminado_en %}<span class="badge text-bg-danger">Eliminado · {{ trabajador.eliminado_en|date:'d/m/Y' }}</span>{% elif trabajador.activo %}<span class="badge text-bg-success">Activo</span>{% else %}<span class="badge text-bg-secondary">Inactivo</span>{% endif %}</td><td class="text-end">{% if not trabajador.eliminado_en %}<div class="cq-row-actions"><a class="btn btn-sm btn-outline-secondary" href="{% url 'trabajadores:editar' trabajador.pk %}">Editar</a><details class="cq-item-acciones"><summary class="btn btn-sm btn-outline-secondary">Opciones</summary><div class="cq-item-panel"><a class="btn btn-sm btn-outline-primary" href="{% url 'trabajadores:qr' trabajador.pk %}">Tarjeta impresa</a><a class="btn btn-sm btn-outline-primary" href="{% url 'trabajadores:qr_telefono' trabajador.pk %}">Imagen teléfono</a>{% if trabajador.activo %}<button class="btn btn-sm btn-outline-danger" type="submit" form="regenerar-qr-{{ trabajador.pk }}">Regenerar QR</button>{% endif %}</div></details></div>{% endif %}</td></tr>{% empty %}<tr><td colspan="6" class="text-secondary">No hay trabajadores registrados.</td></tr>{% endfor %}</tbody>
             </table>
         </div>
     {% endif %}

@@ -13,15 +13,15 @@
             <button class="btn btn-outline-danger btn-sm" type="submit">Eliminar seleccionadas</button>
         </div>
         <div class="cq-table-wrap">
-            <table class="table cq-table">
+            <table class="table cq-table cq-table-cards">
                 <thead><tr><th></th><th>Nombre</th><th>RUT</th><th>Estado</th><th>Trabajadores</th><th></th></tr></thead>
                 <tbody>
                     {% for empresa in empresas %}
                         <tr>
-                            <td><label class="cq-switch cq-switch-table"><input class="company-checkbox" name="empresas" value="{{ empresa.pk }}" type="checkbox"><span class="cq-switch-track" aria-hidden="true"></span><span class="visually-hidden">Seleccionar {{ empresa.nombre }}</span></label></td>
-                            <td class="fw-semibold">{{ empresa.nombre }}</td><td>{{ empresa.rut|default:"-" }}</td>
-                            <td>{% if empresa.activa %}<span class="badge text-bg-success">Activa</span>{% else %}<span class="badge text-bg-secondary">Inactiva</span>{% endif %}</td>
-                            <td>{{ empresa.trabajadores.count }}</td>
+                            <td class="cq-cell-select"><label class="cq-switch cq-switch-table"><input class="company-checkbox" name="empresas" value="{{ empresa.pk }}" type="checkbox"><span class="cq-switch-track" aria-hidden="true"></span><span class="visually-hidden">Seleccionar {{ empresa.nombre }}</span></label></td>
+                            <td class="fw-semibold cq-cell-title">{{ empresa.nombre }}</td><td data-label="RUT">{{ empresa.rut|default:"-" }}</td>
+                            <td data-label="Estado">{% if empresa.activa %}<span class="badge text-bg-success">Activa</span>{% else %}<span class="badge text-bg-secondary">Inactiva</span>{% endif %}</td>
+                            <td data-label="Trabajadores">{{ empresa.trabajadores.count }}</td>
                             <td><a href="{% url 'empresas:perfil' empresa.pk %}">Ver perfil</a></td>
                         </tr>
                     {% empty %}

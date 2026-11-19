@@ -1133,3 +1133,76 @@ td:not(.text-end) .cq-item-panel { right: auto; left: 0; }
 .cq-verificar-listo { background: var(--cq-success-bright); color: var(--cq-on-success-bright); font-weight: 800; font-size: 1.2rem; text-align: center; border-radius: var(--cq-radius); padding: 0.6rem; margin-bottom: 0.6rem; }
 .cq-verificar-listo[hidden] { display: none; }
 a.cq-scan-brand { color: var(--cq-on-dark); text-decoration: none; }
+
+/* Acciones de una fila: la principal visible y el resto detrás de «Opciones». */
+.cq-row-actions { align-items: center; display: inline-flex; gap: var(--cq-gap); }
+.cq-row-actions .cq-item-panel { text-align: left; }
+
+/* ===== Listas de administración como tarjetas en el teléfono ============
+   Cada <td> lleva data-label con el nombre de su columna; bajo 768px la
+   fila se vuelve una tarjeta «etiqueta: valor». En escritorio, tabla normal. */
+@media (max-width: 767.98px) {
+    .cq-table.cq-table-cards { min-width: 0; }
+
+    .cq-table-cards thead {
+        clip: rect(0 0 0 0);
+        height: 1px;
+        overflow: hidden;
+        position: absolute;
+        width: 1px;
+    }
+
+    .cq-table-cards,
+    .cq-table-cards tbody { display: block; width: 100%; }
+
+    .cq-table-cards tr {
+        border-bottom: 1px solid var(--cq-line);
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+        padding: 0.9rem 1rem;
+        position: relative;
+    }
+
+    .cq-table-cards tr:last-child { border-bottom: 0; }
+
+    .cq-table.cq-table-cards td {
+        border: 0;
+        overflow-wrap: anywhere;
+        padding: 0;
+    }
+
+    /* La etiqueta ocupa la columna izquierda; el valor fluye normal a la derecha. */
+    .cq-table.cq-table-cards td[data-label] {
+        padding-left: max(7rem, 38%);
+        position: relative;
+    }
+
+    .cq-table-cards td[data-label]::before {
+        color: var(--cq-muted);
+        content: attr(data-label);
+        left: 0;
+        line-height: 1.9;
+        position: absolute;
+        top: 0;
+        width: calc(max(7rem, 38%) - 0.75rem);
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+    }
+
+    /* El nombre encabeza la tarjeta, sin etiqueta. */
+    .cq-table-cards .cq-cell-title { font-size: 1.05rem; order: -1; padding-right: 3.5rem; }
+
+    /* La selección va arriba a la derecha de la tarjeta. */
+    .cq-table.cq-table-cards .cq-cell-select { position: absolute; right: 1rem; top: 0.85rem; }
+    .cq-table-cards .cq-cell-select:empty { display: none; }
+
+    /* Acciones al pie de la tarjeta; el panel de «Opciones» se abre dentro de ella. */
+    .cq-table-cards td.text-end { margin-top: 0.35rem; text-align: left !important; }
+    .cq-table-cards td .cq-item-panel { box-shadow: none; position: static; }
+    .cq-table-cards .cq-row-actions { align-items: flex-start; display: flex; flex-wrap: wrap; }
+    .cq-table-cards td > a:not(.btn) { display: inline-block; padding: 0.35rem 0; }
+    .cq-table-wrap.cq-con-paneles { overflow: visible; }
+}

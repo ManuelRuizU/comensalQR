@@ -26,7 +26,7 @@
 {% elif not menu %}
     <div class="cq-card p-3">
         <p>No hay menú para este día. Mientras no se publique uno, el escáner registra los almuerzos como siempre, sin pedido.</p>
-        <div class="d-flex flex-wrap gap-3">
+        <div class="cq-toolbar">
             <form method="post" action="{% url 'menus:crear' %}">{% csrf_token %}<input type="hidden" name="local" value="{{ local.pk }}"><input type="hidden" name="fecha" value="{{ fecha|date:'Y-m-d' }}"><button class="btn btn-primary" type="submit">Crear menú vacío</button></form>
             {% if menus_anteriores %}
             <form method="post" action="{% url 'menus:crear' %}" class="d-flex gap-2">{% csrf_token %}<input type="hidden" name="local" value="{{ local.pk }}"><input type="hidden" name="fecha" value="{{ fecha|date:'Y-m-d' }}">

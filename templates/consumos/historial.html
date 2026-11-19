@@ -25,7 +25,7 @@
         {% if es_admin %}
             <div class="col-12 col-md-3"><label class="form-label" for="trabajador">Trabajador</label>{% if empresa_seleccionada %}<select class="form-select" id="trabajador" name="trabajador"><option value="">Todos</option>{% for trabajador in trabajadores %}<option value="{{ trabajador.pk }}" {% if trabajador_seleccionado == trabajador.pk|stringformat:'s' %}selected{% endif %}>{{ trabajador }}</option>{% endfor %}</select>{% else %}<select class="form-select" id="trabajador" disabled><option>Elige una empresa y filtra</option></select>{% endif %}</div>
         {% endif %}
-        <div class="col-12"><button class="btn btn-primary" type="submit">Filtrar</button><a class="btn btn-outline-secondary" href="{% url 'consumos:historial' %}">Limpiar</a></div>
+        <div class="col-12 cq-toolbar"><button class="btn btn-primary" type="submit">Filtrar</button><a class="btn btn-outline-secondary" href="{% url 'consumos:historial' %}">Limpiar</a></div>
     </form>
 </div></div>
 <p class="text-secondary" id="total-consumos">Total: <strong>{{ total_vigentes }}</strong> consumo(s) con los filtros aplicados.{% if total_anulados %} Además hay {{ total_anulados }} anulado(s), que no se cuentan ni se cobran.{% endif %}</p>

@@ -6,7 +6,7 @@
     <div class="cq-card mb-4"><div class="cq-card-body">
         <h2 class="cq-card-title">Descargar los QR de estos trabajadores</h2>
         <p class="cq-subtitle">El papel y la imagen del teléfono tienen el mismo QR: el trabajador puede usar cualquiera de los dos.</p>
-        <div class="d-flex flex-wrap gap-2">
+        <div class="cq-toolbar">
             <a class="btn btn-primary" href="{% url 'trabajadores:qr_pdf' empresa.pk %}?{{ consulta }}">Tarjetas para imprimir (PDF)</a>
             <a class="btn btn-outline-primary" href="{% url 'trabajadores:qr_zip' empresa.pk %}?{{ consulta }}">Imágenes para teléfono (ZIP)</a>
             <a class="btn btn-outline-secondary" href="{% url 'trabajadores:por_empresa' empresa.pk %}">Ir a trabajadores</a>

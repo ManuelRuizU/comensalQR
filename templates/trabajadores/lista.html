@@ -31,10 +31,12 @@
             {% csrf_token %}
             {% if not ver_eliminados %}<div class="cq-bulk-actions">
                 <label class="cq-switch cq-switch-compact mb-0"><input id="select-all-workers" type="checkbox"> <span class="cq-switch-track" aria-hidden="true"></span><span>Seleccionar todos</span></label>
-                <span class="text-secondary small">QR de los seleccionados (o de todos si no marcas ninguno):</span>
-                <a class="btn btn-outline-primary btn-sm" data-descarga-qr href="{% url 'trabajadores:qr_pdf' empresa.pk %}">Imprimir (PDF)</a>
-                <a class="btn btn-outline-primary btn-sm" data-descarga-qr href="{% url 'trabajadores:qr_zip' empresa.pk %}">Imágenes teléfono (ZIP)</a>
-                <button class="btn btn-outline-danger btn-sm" type="submit">Eliminar trabajador</button>
+                <div class="cq-toolbar">
+                    <span class="text-secondary small">QR de los seleccionados (o de todos si no marcas ninguno):</span>
+                    <a class="btn btn-outline-primary btn-sm" data-descarga-qr href="{% url 'trabajadores:qr_pdf' empresa.pk %}">Imprimir (PDF)</a>
+                    <a class="btn btn-outline-primary btn-sm" data-descarga-qr href="{% url 'trabajadores:qr_zip' empresa.pk %}">Imágenes teléfono (ZIP)</a>
+                    <button class="btn btn-outline-danger btn-sm" type="submit">Eliminar trabajador</button>
+                </div>
             </div>{% endif %}
             <div class="cq-table-wrap">
                 <table class="table cq-table">

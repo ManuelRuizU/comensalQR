@@ -25,7 +25,7 @@
     <div class="col-12 col-lg-7">
         <div class="cq-card h-100"><div class="cq-card-body d-flex flex-column justify-content-between gap-4">
             <div><div class="cq-eyebrow">Equipo</div><h2 class="cq-card-title">Trabajadores</h2><p class="cq-subtitle">{{ empresa.trabajadores.count }} trabajadores registrados.</p></div>
-            <div class="d-flex flex-wrap gap-2">
+            <div class="cq-toolbar">
                 <a class="btn btn-outline-primary" href="{% url 'trabajadores:por_empresa' empresa.pk %}">Ver trabajadores</a>
                 {% if empresa.activa %}<a class="btn btn-outline-primary" href="{% url 'trabajadores:importar' empresa.pk %}">Importar desde Excel</a>{% endif %}
             </div>

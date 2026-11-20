@@ -20,25 +20,38 @@
         <div class="container">
             <a class="navbar-brand cq-brand" href="{% if request.user.is_authenticated and not request.user.is_staff %}{% url 'consumos:escaner' %}{% else %}{% url 'consumos:dashboard' %}{% endif %}">ComensalQR</a>
             {% if request.user.is_authenticated %}
-                <div class="cq-nav-actions text-white">
-                    <a class="link-light" href="{% url 'consumos:escaner' %}">Escaner</a>
-                    <a class="link-light" href="{% url 'consumos:historial' %}">Historial</a>
-                    {% if request.user.is_staff %}
-                        <a class="link-light" href="{% url 'menus:menu_dia' %}">Menú</a>
-                        <a class="link-light" href="{% url 'pedidos:lista' %}">Pedidos</a>
-                        <a class="link-light" href="{% url 'despacho:lista' %}">Despacho</a>
-                        <a class="link-light" href="{% url 'empresas:lista' %}">Empresas</a>
-                        <a class="link-light" href="{% url 'locales:lista' %}">Locales</a>
-                        <a class="link-light" href="{% url 'trabajadores:lista' %}">Trabajadores</a>
-                        <a class="link-light" href="{% url 'operadores:lista' %}">Operadores</a>
-                        <a class="link-light" href="{% url 'administradores:lista' %}">Administradores</a>
-                    {% endif %}
-                    <span>{{ request.user.get_username }}</span>
-                    <form method="post" action="{% url 'logout' %}">
-                        {% csrf_token %}
-                        <button class="btn btn-outline-light btn-sm" type="submit">Salir</button>
-                    </form>
-                </div>
+                {% if request.user.is_staff %}
+                    {# Escritorio (≥1200px): barra en una línea. El nombre solo cabe desde 1400px. #}
+                    <div class="cq-nav-actions text-white d-none d-xl-flex">
+                        {% include "_nav_admin_enlaces.html" with clase="link-light" %}
+                        <span class="d-none d-xxl-inline">{{ request.user.get_username }}</span>
+                        <form method="post" action="{% url 'logout' %}">
+                            {% csrf_token %}
+                            <button class="btn btn-outline-light btn-sm" type="submit" title="Salir ({{ request.user.get_username }})">Salir</button>
+                        </form>
+                    </div>
+                    {# Teléfono y tablet (<1200px): menú hamburguesa, el mismo patrón del escáner. #}
+                    <details class="cq-nav-menu d-xl-none">
+                        <summary aria-label="Menú">
+                            <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+                        </summary>
+                        <div class="cq-nav-menu-list">
+                            <span class="cq-nav-menu-user">{{ request.user.get_username }}</span>
+                            {% include "_nav_admin_enlaces.html" with clase="" %}
+                            <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Salir</button></form>
+                        </div>
+                    </details>
+                {% else %}
+                    <div class="cq-nav-actions text-white">
+                        <a class="link-light" href="{% url 'consumos:escaner' %}">Escaner</a>
+                        <a class="link-light" href="{% url 'consumos:historial' %}">Historial</a>
+                        <span>{{ request.user.get_username }}</span>
+                        <form method="post" action="{% url 'logout' %}">
+                            {% csrf_token %}
+                            <button class="btn btn-outline-light btn-sm" type="submit">Salir</button>
+                        </form>
+                    </div>
+                {% endif %}
             {% endif %}
         </div>
     </nav>

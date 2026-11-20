@@ -1,0 +1,11 @@
+{# Enlaces del administrador: se usan en la barra (escritorio) y en el menú hamburguesa (teléfono y tablet). #}
+<a class="{{ clase }}" href="{% url 'consumos:escaner' %}">Escaner</a>
+<a class="{{ clase }}" href="{% url 'consumos:historial' %}">Historial</a>
+<a class="{{ clase }}" href="{% url 'menus:menu_dia' %}">Menú</a>
+<a class="{{ clase }}" href="{% url 'pedidos:lista' %}">Pedidos</a>
+<a class="{{ clase }}" href="{% url 'despacho:lista' %}">Despacho</a>
+<a class="{{ clase }}" href="{% url 'empresas:lista' %}">Empresas</a>
+<a class="{{ clase }}" href="{% url 'locales:lista' %}">Locales</a>
+<a class="{{ clase }}" href="{% url 'trabajadores:lista' %}">Trabajadores</a>
+<a class="{{ clase }}" href="{% url 'operadores:lista' %}">Operadores</a>
+<a class="{{ clase }}" href="{% url 'administradores:lista' %}">Administradores</a>
